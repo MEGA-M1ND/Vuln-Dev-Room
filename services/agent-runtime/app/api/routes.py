@@ -1,14 +1,17 @@
 """Internal-only HTTP API.
 
 Endpoints:
-  GET  /health                 - liveness; leaks no secrets/model config
-  POST /internal/runs          - start a run (service-authenticated)
-  GET  /internal/runs/{runId}  - agent-side state (service-authenticated)
+  GET  /health                        - liveness; leaks no secrets/model config
+  POST /internal/runs                 - start a run (service-authenticated)
+  GET  /internal/runs/{runId}         - agent-side state (service-authenticated)
+  POST /internal/runs/{runId}/resume  - approve/reject the plan gate
 
 There is deliberately NO endpoint to run an arbitrary command or prompt.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
@@ -16,10 +19,13 @@ from app.api.schemas import (
     CreateRunRequest,
     CreateRunResponse,
     HealthResponse,
+    ResumeRunRequest,
+    ResumeRunResponse,
     RunStateResponse,
 )
-from app.config import Settings, get_settings
-from app.graph.backend_agent import RunRequest, run_backend_agent
+from app.config import RepositoryConfig, Settings, get_settings
+from app.graph.backend_agent import RunRequest, resume_run, start_run
+from app.notifier import Notifier
 from app.persistence import runs as runs_db
 from app.sandbox.docker_sandbox import ensure_docker_available
 from app.sandbox.base import SandboxUnavailableError
@@ -45,9 +51,35 @@ def health() -> HealthResponse:
     )
 
 
-def _execute_run(request: RunRequest, settings: Settings) -> None:
-    # Runs in a background task; failures are recorded durably inside.
-    run_backend_agent(request, settings)
+def _build_run_request(
+    run: dict[str, Any],
+    repo: RepositoryConfig,
+    *,
+    title: str,
+    description: str | None,
+    allowed_paths: list[str],
+) -> RunRequest:
+    return RunRequest(
+        run_id=run["id"],
+        graph_thread_id=str(run["graphThreadId"]),
+        ticket_title=title,
+        ticket_description=description or "",
+        repo_config=repo,
+        allowed_paths=allowed_paths,
+    )
+
+
+def _notifier_for(settings: Settings, run: dict[str, Any]) -> Notifier:
+    return Notifier(settings=settings, run_id=run["id"], room_id=str(run["roomId"]))
+
+
+def _execute_start(request: RunRequest, settings: Settings, notifier: Notifier) -> None:
+    # Runs phase 1 in a background task; failures are recorded durably inside.
+    start_run(request, settings, notifier=notifier)
+
+
+def _execute_resume(request: RunRequest, settings: Settings, notifier: Notifier) -> None:
+    resume_run(request, settings, notifier=notifier)
 
 
 @router.post(
@@ -89,16 +121,68 @@ def create_run(
     # allow-list (defense in depth): only paths allowed by BOTH are writable.
     allowed = _intersect_allowed(body.allowedPaths, repo.allowed_paths)
 
-    run_request = RunRequest(
-        run_id=body.runId,
-        graph_thread_id=str(run["graphThreadId"]),
-        ticket_title=body.title,
-        ticket_description=body.description or "",
-        repo_config=repo,
-        allowed_paths=allowed,
+    run_request = _build_run_request(
+        run, repo, title=body.title, description=body.description, allowed_paths=allowed
     )
-    background.add_task(_execute_run, run_request, settings)
+    background.add_task(
+        _execute_start, run_request, settings, _notifier_for(settings, run)
+    )
     return CreateRunResponse(runId=body.runId, status="RUNNING", accepted=True)
+
+
+@router.post(
+    "/internal/runs/{run_id}/resume",
+    response_model=ResumeRunResponse,
+    dependencies=[Depends(require_service_token)],
+)
+def resume_run_endpoint(
+    run_id: str,
+    body: ResumeRunRequest,
+    background: BackgroundTasks,
+    settings: Settings = Depends(get_settings),
+) -> ResumeRunResponse:
+    """Approve or reject a run paused at the plan-approval gate.
+
+    Only valid while the run is AWAITING_APPROVAL. Approve resumes the graph
+    (applying the checkpointed plan); reject is terminal and writes nothing.
+    """
+    run = runs_db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    if run["status"] != "AWAITING_APPROVAL":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run is not awaiting approval (status={run['status']}).",
+        )
+
+    notifier = _notifier_for(settings, run)
+
+    if body.decision == "reject":
+        # Nothing was written; the run ends here.
+        runs_db.update_run_status(
+            run_id,
+            "CANCELLED",
+            error_code="PLAN_REJECTED",
+            error_summary="The plan was rejected by a room member.",
+        )
+        runs_db.append_event(run_id, "PLAN_REJECTED", actor_type="user")
+        runs_db.append_event(run_id, "RUN_CANCELLED", actor_type="user")
+        notifier.notify(status="CANCELLED", event_type="PLAN_REJECTED")
+        return ResumeRunResponse(runId=run_id, status="CANCELLED", accepted=True)
+
+    repo = settings.repository(str(run["targetRepositoryKey"]))
+    if repo is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown repository key.")
+
+    run_request = _build_run_request(
+        run,
+        repo,
+        title="",  # title/description already captured in checkpoint state
+        description="",
+        allowed_paths=_intersect_allowed([], repo.allowed_paths),
+    )
+    background.add_task(_execute_resume, run_request, settings, notifier)
+    return ResumeRunResponse(runId=run_id, status="RUNNING", accepted=True)
 
 
 @router.get(

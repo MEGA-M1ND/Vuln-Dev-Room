@@ -34,15 +34,27 @@ def test_backend_agent_graph_end_to_end(docker_required, demo_repo):
             toolset=toolset, model=FakeModel(), language="python", recorder=recorder
         )
         graph = _build_graph(ctx, MemorySaver())
-        final = graph.invoke(
+        cfg = {"configurable": {"thread_id": "t-1"}}
+
+        # Phase 1: runs inspect + plan, then PAUSES before apply_edits (the
+        # Stage 3 approval gate). No file has been written yet.
+        graph.invoke(
             {
                 "run_id": "test-run",
                 "ticket_title": "Implement token bucket",
                 "ticket_description": "",
                 "base_revision": prepared.base_revision,
             },
-            config={"configurable": {"thread_id": "t-1"}},
+            config=cfg,
         )
+        paused = graph.get_state(cfg)
+        assert paused.next == ("apply_edits",)  # gated before writing
+        assert paused.values.get("proposed_edits")  # plan is ready
+        assert "FILE_PATCHED" not in [e[0] for e in recorder.events]
+        assert sandbox.get_git_diff().strip() == ""  # nothing written pre-approval
+
+        # Phase 2: approve -> resume applies the checkpointed plan and finishes.
+        final = graph.invoke(None, config=cfg)
 
         # State reflects a real, verified change.
         assert final["applied_paths"] == ["backend/rate_limiter.py"]
