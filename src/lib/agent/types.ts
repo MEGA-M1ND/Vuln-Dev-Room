@@ -25,6 +25,16 @@ export type RunDTO = {
   createdAt: string;
 };
 
+export type RunEventDTO = {
+  id: string;
+  sequence: number;
+  type: string;
+  actorType: string;
+  actorId: string | null;
+  payloadJson: unknown;
+  createdAt: string;
+};
+
 export type RunArtifactDTO = {
   id: string;
   type: RunArtifactType;

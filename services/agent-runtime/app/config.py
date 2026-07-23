@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     # Raw JSON registry of repositories.
     repositories_json: str = Field(default="{}", alias="DEVROOM_REPOSITORIES_JSON")
 
+    # Stage 3: base URL of the Next.js web app. The runtime calls its internal
+    # callback so the web app can broadcast realtime run updates to the room.
+    web_callback_url: str = Field(default="", alias="DEVROOM_WEB_CALLBACK_URL")
+
     @property
     def repositories(self) -> dict[str, RepositoryConfig]:
         raw: dict[str, Any] = json.loads(self.repositories_json or "{}")

@@ -95,4 +95,22 @@ describe.skipIf(!hasDb)("agent run creation (integration)", () => {
     expect(latest).not.toBeNull();
     expect(Object.keys(latest as object)).not.toContain("sandboxId");
   });
+
+  it("Stage 3: an AWAITING_APPROVAL run still blocks a new run", async () => {
+    // Move the current run to the approval gate (still an active slot holder).
+    const current = await latestRunForTicket(ticketId);
+    await prisma.agentRun.update({
+      where: { id: current!.id },
+      data: { status: "AWAITING_APPROVAL" },
+    });
+
+    await expect(
+      createAgentRun({
+        roomId,
+        ticketId,
+        requestedById: userId,
+        targetRepositoryKey: "agentguard-demo",
+      }),
+    ).rejects.toMatchObject({ code: "RUN_ALREADY_ACTIVE" });
+  });
 });

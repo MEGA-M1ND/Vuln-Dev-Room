@@ -48,12 +48,16 @@ class Recorder(Protocol):
 
 @dataclass
 class DbRecorder:
-    """Writes events/artifacts to Postgres for a run."""
+    """Writes events/artifacts to Postgres for a run and pings the realtime
+    notifier so the room sees each event live."""
 
     run_id: str
+    notifier: Any = None  # Notifier | NullNotifier | None
 
     def event(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
         runs_db.append_event(self.run_id, event_type, payload=payload)
+        if self.notifier is not None:
+            self.notifier.notify(event_type=event_type)
 
     def artifact(
         self,
@@ -225,7 +229,10 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
     graph.add_edge("capture_diff", "summarize")
     graph.add_edge("summarize", END)
 
-    return graph.compile(checkpointer=checkpointer)
+    # Stage 3: pause AFTER planning and BEFORE any file is written, so a human
+    # can approve or reject the plan. The proposed edits are already in the
+    # checkpointed state, so resuming applies exactly the approved plan.
+    return graph.compile(checkpointer=checkpointer, interrupt_before=["apply_edits"])
 
 
 # --- orchestrator -----------------------------------------------------------
@@ -241,20 +248,24 @@ class RunRequest:
     allowed_paths: list[str]
 
 
-def run_backend_agent(request: RunRequest, settings: Settings) -> str:
-    """Execute a run to completion. Returns the terminal status.
+def _thread_config(request: RunRequest) -> dict[str, Any]:
+    return {"configurable": {"thread_id": request.graph_thread_id}}
 
-    Owns sandbox lifecycle + terminal status. Never raises to the caller: all
-    failures are recorded durably as FAILED with an error code.
+
+def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> str:
+    """Phase 1: inspect + plan, then pause at the approval gate.
+
+    Returns "AWAITING_APPROVAL" when a human decision is required, or a terminal
+    status when there is nothing to approve (no edits) or on failure.
     """
-    recorder: Recorder = DbRecorder(request.run_id)
+    recorder = DbRecorder(request.run_id, notifier=notifier)
     runs_db.update_run_status(request.run_id, "RUNNING")
+    _notify(notifier, status="RUNNING")
 
-    # 1. Sandbox must be a real isolated container — no host fallback.
     try:
         ensure_docker_available()
     except SandboxUnavailableError as exc:
-        return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc))
+        return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc), notifier)
 
     sandbox = DockerSandbox(settings)
     try:
@@ -275,14 +286,18 @@ def run_backend_agent(request: RunRequest, settings: Settings) -> str:
             allowed_paths=request.allowed_paths or request.repo_config.allowed_paths,
             test_command=request.repo_config.test_command,
         )
-        model = build_model(settings)
         ctx = RunContext(
-            toolset=toolset, model=model, language=request.repo_config.language, recorder=recorder
+            toolset=toolset,
+            model=build_model(settings),
+            language=request.repo_config.language,
+            recorder=recorder,
         )
 
         with checkpointer_context() as checkpointer:
             app = _build_graph(ctx, checkpointer)
-            final_state: AgentState = app.invoke(
+            cfg = _thread_config(request)
+            # Runs inspect_repository + plan_change, then stops before apply_edits.
+            app.invoke(
                 {
                     "run_id": request.run_id,
                     "ticket_title": request.ticket_title,
@@ -290,36 +305,120 @@ def run_backend_agent(request: RunRequest, settings: Settings) -> str:
                     "language": request.repo_config.language,
                     "allowed_paths": toolset.allowed_paths,
                 },
-                config={"configurable": {"thread_id": request.graph_thread_id}},
+                config=cfg,
             )
+            state = app.get_state(cfg)
+            proposed = state.values.get("proposed_edits", [])
 
-        applied = final_state.get("applied_paths", [])
-        passed = final_state.get("tests_passed", False)
-        if applied and not passed:
-            return _fail(
-                request.run_id,
-                recorder,
-                "TESTS_FAILED",
-                "The change was applied but the project test suite did not pass.",
-            )
-        runs_db.update_run_status(request.run_id, "SUCCEEDED")
-        recorder.event("RUN_SUCCEEDED", {"changedFiles": applied})
-        return "SUCCEEDED"
+            if not proposed:
+                # Nothing to approve — continue straight to completion.
+                final_state = app.invoke(None, config=cfg)
+                return _finalize(request.run_id, recorder, final_state, notifier)
+
+        # Pause for human approval. The plan artifact is already recorded.
+        runs_db.update_run_status(request.run_id, "AWAITING_APPROVAL")
+        recorder.event(
+            "APPROVAL_REQUESTED",
+            {"proposedFiles": [e["path"] for e in proposed]},
+        )
+        _notify(notifier, status="AWAITING_APPROVAL")
+        return "AWAITING_APPROVAL"
 
     except PathNotAllowedError as exc:
-        return _fail(request.run_id, recorder, "PATH_NOT_ALLOWED", str(exc))
+        return _fail(request.run_id, recorder, "PATH_NOT_ALLOWED", str(exc), notifier)
     except SandboxUnavailableError as exc:
-        return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc))
-    except Exception as exc:  # noqa: BLE001 - record any failure durably
-        return _fail(request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}")
+        return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc), notifier)
+    except Exception as exc:  # noqa: BLE001
+        return _fail(request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
     finally:
         sandbox.cleanup()
 
 
-def _fail(run_id: str, recorder: Recorder, code: str, summary: str) -> str:
+def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) -> str:
+    """Phase 2 (approval): apply the checkpointed plan in a fresh sandbox, then
+    run tests, capture the diff and summarize.
+
+    A fresh sandbox at the same base revision is prepared, and the graph resumes
+    from the checkpoint applying exactly the plan the human approved.
+    """
+    recorder = DbRecorder(request.run_id, notifier=notifier)
+    runs_db.update_run_status(request.run_id, "RUNNING")
+    recorder.event("PLAN_APPROVED", {})
+    _notify(notifier, status="RUNNING")
+
+    try:
+        ensure_docker_available()
+    except SandboxUnavailableError as exc:
+        return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc), notifier)
+
+    sandbox = DockerSandbox(settings)
+    try:
+        prepared = sandbox.prepare_repository(request.repo_config.source_path)
+        runs_db.update_run_status(request.run_id, "RUNNING", sandbox_id=sandbox.sandbox_id)
+
+        toolset = Toolset(
+            sandbox=sandbox,
+            allowed_paths=request.allowed_paths or request.repo_config.allowed_paths,
+            test_command=request.repo_config.test_command,
+        )
+        ctx = RunContext(
+            toolset=toolset,
+            model=build_model(settings),
+            language=request.repo_config.language,
+            recorder=recorder,
+        )
+        _ = prepared  # base revision unchanged; kept for clarity
+
+        with checkpointer_context() as checkpointer:
+            app = _build_graph(ctx, checkpointer)
+            cfg = _thread_config(request)
+            # Resume from the interrupt: applies checkpointed proposed_edits.
+            final_state = app.invoke(None, config=cfg)
+
+        return _finalize(request.run_id, recorder, final_state, notifier)
+
+    except PathNotAllowedError as exc:
+        return _fail(request.run_id, recorder, "PATH_NOT_ALLOWED", str(exc), notifier)
+    except SandboxUnavailableError as exc:
+        return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc), notifier)
+    except Exception as exc:  # noqa: BLE001
+        return _fail(request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
+    finally:
+        sandbox.cleanup()
+
+
+def _finalize(
+    run_id: str, recorder: Recorder, final_state: AgentState, notifier: Any
+) -> str:
+    applied = final_state.get("applied_paths", [])
+    passed = final_state.get("tests_passed", False)
+    if applied and not passed:
+        return _fail(
+            run_id,
+            recorder,
+            "TESTS_FAILED",
+            "The change was applied but the project test suite did not pass.",
+            notifier,
+        )
+    runs_db.update_run_status(run_id, "SUCCEEDED")
+    recorder.event("RUN_SUCCEEDED", {"changedFiles": applied})
+    _notify(notifier, status="SUCCEEDED")
+    return "SUCCEEDED"
+
+
+def _notify(notifier: Any, *, status: str) -> None:
+    if notifier is not None:
+        notifier.notify(status=status)
+
+
+def _fail(
+    run_id: str, recorder: Recorder, code: str, summary: str, notifier: Any = None
+) -> str:
     from app.security.redaction import redact
 
     safe = redact(summary)
     runs_db.update_run_status(run_id, "FAILED", error_code=code, error_summary=safe)
     recorder.event("RUN_FAILED", {"errorCode": code, "errorSummary": safe})
+    if notifier is not None:
+        notifier.notify(status="FAILED")
     return "FAILED"
