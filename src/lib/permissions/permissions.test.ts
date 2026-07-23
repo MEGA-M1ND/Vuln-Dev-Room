@@ -50,4 +50,16 @@ describe("permissions matrix", () => {
     expect(canMutateTickets("ENGINEER")).toBe(true);
     expect(canMutateTickets("VIEWER")).toBe(false);
   });
+
+  it("agent runs: OWNER and ENGINEER can start; VIEWER cannot", () => {
+    expect(can("OWNER", "run:create")).toBe(true);
+    expect(can("ENGINEER", "run:create")).toBe(true);
+    expect(can("VIEWER", "run:create")).toBe(false);
+  });
+
+  it("agent runs: all roles can read runs", () => {
+    expect(can("OWNER", "run:read")).toBe(true);
+    expect(can("ENGINEER", "run:read")).toBe(true);
+    expect(can("VIEWER", "run:read")).toBe(true);
+  });
 });

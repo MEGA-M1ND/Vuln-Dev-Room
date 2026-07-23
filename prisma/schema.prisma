@@ -32,6 +32,37 @@ enum TicketPriority {
   URGENT
 }
 
+// --- Stage 2: coding-agent runs -------------------------------------------
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum RunArtifactType {
+  PLAN
+  DIFF
+  TEST_RESULT
+  SUMMARY
+  LOG
+}
+
+enum RunEventType {
+  RUN_CREATED
+  SANDBOX_PREPARED
+  REPOSITORY_INSPECTED
+  PLAN_CREATED
+  FILE_PATCHED
+  TESTS_STARTED
+  TESTS_FINISHED
+  DIFF_CAPTURED
+  RUN_SUCCEEDED
+  RUN_FAILED
+}
+
 model User {
   id        String   @id @default(cuid())
   name      String
@@ -44,6 +75,7 @@ model User {
   memberships      RoomMembership[]
   createdTickets   Ticket[]         @relation("TicketCreatedBy")
   assignedTickets  Ticket[]         @relation("TicketAssignee")
+  requestedRuns    AgentRun[]       @relation("RunRequestedBy")
 
   @@index([email])
 }
@@ -61,6 +93,7 @@ model Room {
   createdBy   User             @relation("RoomCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
   memberships RoomMembership[]
   tickets     Ticket[]
+  agentRuns   AgentRun[]
 
   @@index([createdById])
 }
@@ -100,9 +133,87 @@ model Ticket {
   room      Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
   assignee  User? @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   createdBy User  @relation("TicketCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  agentRuns AgentRun[]
 
   // Board fetch and column ordering: rooms/status/position.
   @@index([roomId, status, position])
   @@index([assigneeId])
   @@index([createdById])
+}
+
+/// A single coding-agent execution against a ticket. Durable state lives here;
+/// the Python runtime updates status/artifacts/events. LangGraph checkpoints are
+/// stored separately in the `langgraph` schema and are NOT modeled by Prisma.
+model AgentRun {
+  id                  String         @id @default(cuid())
+  roomId              String
+  ticketId            String
+  requestedById       String
+  agentId             String         @default("backend-agent")
+  status              AgentRunStatus @default(QUEUED)
+  graphThreadId       String         @unique
+  // Sandbox id is operational metadata; never exposed to browser clients.
+  sandboxId           String?
+  targetRepositoryKey String
+  baseRevision        String?
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  errorCode           String?
+  errorSummary        String?
+  // Bumped on every status change (a lightweight change token for polling).
+  runVersion          Int            @default(1)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  // Enforces "at most one active run per ticket" at the DATABASE level: this is
+  // set to `ticketId` while QUEUED/RUNNING and null once terminal. Postgres
+  // permits many NULLs but only one non-null value per ticket, so two active
+  // runs for the same ticket are impossible even under concurrency.
+  activeTicketId String? @unique
+
+  room        Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  ticket      Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  requestedBy User          @relation("RunRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
+  artifacts   RunArtifact[]
+  events      RunEvent[]
+
+  @@index([ticketId, createdAt])
+  @@index([roomId])
+  @@index([status])
+}
+
+/// Append-only durable output of a run (plan, diff, test result, summary, log).
+model RunArtifact {
+  id          String          @id @default(cuid())
+  runId       String
+  type        RunArtifactType
+  title       String
+  contentText String?
+  contentJson Json?
+  metadataJson Json?
+  sequence    Int
+  createdAt   DateTime        @default(now())
+
+  run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  // Monotonic, unique sequence per run — also prevents accidental duplicates.
+  @@unique([runId, sequence])
+  @@index([runId, type])
+}
+
+/// Append-only event log for a run (state transitions, tool activity).
+model RunEvent {
+  id          String       @id @default(cuid())
+  runId       String
+  sequence    Int
+  type        RunEventType
+  actorType   String       @default("agent")
+  actorId     String?
+  payloadJson Json?
+  createdAt   DateTime     @default(now())
+
+  run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([runId])
 }

@@ -14,6 +14,7 @@ import {
 } from "@/components/dev-room/ticket-meta";
 import { TicketDialog } from "@/components/dev-room/ticket-dialog";
 import { TicketComments } from "@/components/dev-room/ticket-comments";
+import { AgentRunPanel } from "@/components/dev-room/agent-run-panel";
 import { TicketViewers } from "@/components/dev-room/ticket-viewers";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -153,6 +154,13 @@ export function TicketDetails({
             No description provided.
           </p>
         )}
+      </div>
+
+      <div className="border-b border-border p-4">
+        <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
+          Coding agent
+        </h3>
+        <AgentRunPanel key={ticket.id} ticketId={ticket.id} />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">

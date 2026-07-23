@@ -1,0 +1,38 @@
+[project]
+name = "devroom-agent-runtime"
+version = "0.1.0"
+description = "Dev Room Stage 2 — sandboxed LangGraph backend coding agent runtime"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "psycopg[binary]>=3.2",
+  "langgraph>=0.2.60",
+  "langgraph-checkpoint-postgres>=2.0.0",
+  "langgraph-checkpoint>=2.0.0",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40"]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# Only our real tests — never the fixture template's stubbed tests, which are
+# designed to run *inside the sandbox*, not in the host suite.
+testpaths = ["app/tests/unit", "app/tests/integration"]
+norecursedirs = ["app/tests/fixtures"]
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -308,18 +308,93 @@ tests/
 - Comment threads live in Liveblocks (as designed); they are not mirrored into
   Postgres in Stage 1.
 
-## Recommended first task for Stage 2
+## Stage 2 — Sandboxed coding agent (`backend-agent`)
 
-**Introduce a durable "agent task" abstraction and a background worker boundary.**
-Add an `AgentRun` entity (ticket-scoped: status, requestedBy, startedAt, logs
-pointer) and a typed job-dispatch seam in `src/lib/events`, so a **separate**
-Python/LangGraph worker (a later stage) can claim a ticket, stream status back
-through the existing Liveblocks broadcast channel, and have humans pause/approve/
-take over — all without the web app ever executing code itself. This reuses the
-Stage 1 invalidation + presence plumbing and keeps agents clearly labeled as a
-distinct, opt-in surface.
+Stage 2 adds the first real coding agent: a **separate Python agent-runtime**
+service (`services/agent-runtime/`) that runs a LangGraph agent inside an
+**isolated Docker sandbox**. From a ticket, an OWNER/ENGINEER starts a run; the
+agent inspects a configured repository snapshot, plans a change, edits only
+allow-listed files, runs the project's tests, and records a durable **plan,
+diff, test result and summary** the whole room can review (read-only, polled).
+
+**Responsibility split** (unchanged principle: the browser never touches
+LangGraph/Docker/a model):
+
+- **Next.js** — authn, room/role authorization, the run UI, the run REST API,
+  Prisma-owned run tables, and calling the internal runtime. Never runs agent
+  code.
+- **Python agent-runtime** — FastAPI, LangGraph execution + Postgres
+  checkpointing (in a dedicated `langgraph` schema), sandbox lifecycle, the
+  constrained toolset, model invocation. Internal-token auth only.
+- **PostgreSQL** — Stage 1 tables + new `AgentRun` / `RunArtifact` / `RunEvent`
+  (Prisma-owned); LangGraph checkpoints isolated in the `langgraph` schema.
+- **Docker** — one short-lived, `--network=none`, non-root, `--read-only`,
+  cap-dropped, resource-limited container per run. The repo is copied in (no
+  bind mounts); the host source is never modified; **no host-execution
+  fallback**.
+
+### Data model (added)
+
+`AgentRun` (roomId, ticketId, requestedById, agentId, status, graphThreadId,
+sandboxId, targetRepositoryKey, baseRevision, timestamps, errorCode/Summary,
+runVersion) · `RunArtifact` (PLAN/DIFF/TEST_RESULT/SUMMARY/LOG, append-only,
+monotonic `sequence`) · `RunEvent` (append-only event log). **At most one active
+run per ticket** is enforced at the database level by a unique `activeTicketId`
+(set while QUEUED/RUNNING, cleared when terminal) — race-proof, plus a
+transactional pre-check for a clean error.
+
+### Run API (browser-safe)
+
+| Method + path                          | Who            | Purpose                     |
+| -------------------------------------- | -------------- | --------------------------- |
+| `POST /api/tickets/[ticketId]/runs`    | OWNER/ENGINEER | Start a run (409 if active) |
+| `GET  /api/tickets/[ticketId]/runs`    | members        | Latest run for the ticket   |
+| `GET  /api/runs/[runId]`               | members        | Run status (polling)        |
+| `GET  /api/runs/[runId]/artifacts`     | members        | Plan/diff/test/summary      |
+
+`sandboxId` and repository `source_path`s are **never** serialized to the
+browser. The browser only ever sends a repository **key** (validated by the
+runtime), never a filesystem path or URL.
+
+### Running Stage 2 locally
+
+1. Build the sandbox image and start the runtime — see
+   [`services/agent-runtime/README.md`](services/agent-runtime/README.md).
+2. In the web app's `.env`, set `DEVROOM_AGENT_SERVICE_TOKEN` (matching the
+   runtime), `DEVROOM_AGENT_SERVICE_URL`, and `DEVROOM_DEFAULT_REPOSITORY_KEY`.
+3. Apply the Stage 2 migration: `npm run db:migrate` (already included).
+4. Open a ticket → **Coding agent** panel → **Run backend agent**. The panel
+   polls to `SUCCEEDED`/`FAILED` and shows the plan, test results and diff.
+
+### Stage 2 tests
+
+- **TypeScript** (`npm test`): run authorization (VIEWER cannot start a run) and
+  a Postgres integration test proving the **duplicate-active-run** guard and that
+  the DTO omits `sandboxId`.
+- **Python** (`cd services/agent-runtime && python -m pytest -q`): path
+  allow-list/traversal, deterministic `FakeModel`, redaction, config parsing,
+  `apply_patch` allow-list, plus Docker-gated integration tests running a **real**
+  sandbox + the full LangGraph pipeline on the fixture repo.
+
+### Stage 2 limitations
+
+- Realtime updates are **polling-based** (streaming is a later stage).
+- One agent (`backend-agent`) and one repository language path (Python) are
+  wired; the model/tool/sandbox seams are built to extend.
+- Runs need Docker + the runtime service; without them the agent panel shows a
+  clear "not configured" state and no run can silently execute on the host.
+
+## Recommended first task for Stage 3
+
+**Add realtime run streaming and the first human-in-the-loop control.** Stream
+`RunEvent`s to the room over the existing Liveblocks broadcast channel (replacing
+polling) and add a LangGraph interrupt before `apply_edits` so an OWNER can
+**approve or reject** a plan before any file is written — reusing the Stage 2
+checkpointing (the graph can resume from the `langgraph` checkpoint) and the
+Stage 1 presence/invalidation plumbing. This is the foundation for redirects,
+pause/resume and takeover.
 
 ---
 
-_Stage 1 deliberately excludes AI agents, code execution, and repository
-operations. Any agent affordance in the UI is a clearly labeled future feature._
+_Agents are a clearly labeled, opt-in surface. The web app never executes code;
+all execution happens inside the isolated sandbox in the Python runtime._

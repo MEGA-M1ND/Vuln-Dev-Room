@@ -18,6 +18,22 @@ const serverSchema = z.object({
     .optional()
     .transform((v) => v === "true"),
   LIVEBLOCKS_SECRET_KEY: z.string().optional().default(""),
+
+  // --- Stage 2: agent runtime (server-only) ---
+  // Base URL of the internal Python agent-runtime service.
+  DEVROOM_AGENT_SERVICE_URL: z
+    .string()
+    .url()
+    .optional()
+    .default("http://127.0.0.1:8787"),
+  // Shared internal service token. Must match the runtime's token.
+  DEVROOM_AGENT_SERVICE_TOKEN: z.string().optional().default(""),
+  // The repository registry key runs default to. The runtime validates keys
+  // against its own registry; the browser never sends a filesystem path.
+  DEVROOM_DEFAULT_REPOSITORY_KEY: z
+    .string()
+    .optional()
+    .default("agentguard-demo"),
 });
 
 const parsed = serverSchema.safeParse(process.env);
@@ -42,3 +58,7 @@ export const isDevAuthEnabled =
   env.NODE_ENV !== "production" && env.DEV_AUTH_ENABLED === true;
 
 export const isLiveblocksConfigured = env.LIVEBLOCKS_SECRET_KEY.length > 0;
+
+/** Whether the agent runtime is wired up (a service token is configured). */
+export const isAgentRuntimeConfigured =
+  env.DEVROOM_AGENT_SERVICE_TOKEN.length > 0;

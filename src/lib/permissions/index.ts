@@ -19,7 +19,10 @@ export type RoomAction =
   | "ticket:delete"
   | "comment:read"
   | "comment:create"
-  | "presence:view";
+  | "presence:view"
+  // Stage 2: agent runs.
+  | "run:create"
+  | "run:read";
 
 const OWNER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "room:read",
@@ -33,6 +36,8 @@ const OWNER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "comment:read",
   "comment:create",
   "presence:view",
+  "run:create",
+  "run:read",
 ]);
 
 const ENGINEER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
@@ -44,6 +49,8 @@ const ENGINEER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "comment:read",
   "comment:create",
   "presence:view",
+  "run:create",
+  "run:read",
 ]);
 
 // Stage 1 decision: VIEWERs MAY add comments (documented in README). They can
@@ -53,6 +60,8 @@ const VIEWER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "comment:read",
   "comment:create",
   "presence:view",
+  // Viewers may observe agent runs but never start one.
+  "run:read",
 ]);
 
 const ROLE_ACTIONS: Record<MembershipRole, ReadonlySet<RoomAction>> = {

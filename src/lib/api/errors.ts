@@ -16,6 +16,7 @@ export type ApiErrorCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "TICKET_VERSION_CONFLICT"
+  | "RUN_ALREADY_ACTIVE"
   | "INTERNAL_ERROR";
 
 const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
@@ -25,6 +26,7 @@ const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   FORBIDDEN: 403,
   NOT_FOUND: 404,
   TICKET_VERSION_CONFLICT: 409,
+  RUN_ALREADY_ACTIVE: 409,
   INTERNAL_ERROR: 500,
 };
 
