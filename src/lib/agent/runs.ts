@@ -4,9 +4,11 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db/client";
 import { ApiError } from "@/lib/api/errors";
-import type { RunArtifactDTO, RunDTO } from "@/lib/agent/types";
+import type { RunArtifactDTO, RunDTO, RunEventDTO } from "@/lib/agent/types";
 
-const ACTIVE_STATUSES = ["QUEUED", "RUNNING"] as const;
+// A run occupies the ticket's single-active slot until it is terminal. Stage 3
+// adds AWAITING_APPROVAL, which is still active (a decision is pending).
+const ACTIVE_STATUSES = ["QUEUED", "RUNNING", "AWAITING_APPROVAL"] as const;
 
 type RunWithRequester = Prisma.AgentRunGetPayload<{
   include: {
@@ -143,6 +145,22 @@ export async function latestRunForTicket(
     include: runInclude,
   });
   return run ? toRunDTO(run) : null;
+}
+
+export async function listRunEvents(runId: string): Promise<RunEventDTO[]> {
+  const events = await prisma.runEvent.findMany({
+    where: { runId },
+    orderBy: { sequence: "asc" },
+  });
+  return events.map((e) => ({
+    id: e.id,
+    sequence: e.sequence,
+    type: e.type,
+    actorType: e.actorType,
+    actorId: e.actorId,
+    payloadJson: e.payloadJson,
+    createdAt: e.createdAt.toISOString(),
+  }));
 }
 
 export async function listRunArtifacts(runId: string): Promise<RunArtifactDTO[]> {

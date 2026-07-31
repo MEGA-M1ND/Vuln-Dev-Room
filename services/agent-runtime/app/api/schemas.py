@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -20,6 +22,16 @@ class CreateRunRequest(BaseModel):
 
 
 class CreateRunResponse(BaseModel):
+    runId: str
+    status: str
+    accepted: bool
+
+
+class ResumeRunRequest(BaseModel):
+    decision: Literal["approve", "reject"]
+
+
+class ResumeRunResponse(BaseModel):
     runId: str
     status: str
     accepted: bool

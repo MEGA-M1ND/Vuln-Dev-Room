@@ -57,3 +57,47 @@ export async function startAgentRun(payload: StartRunPayload): Promise<void> {
     );
   }
 }
+
+/** Approve or reject a run paused at the plan-approval gate. */
+export async function resumeAgentRun(
+  runId: string,
+  decision: "approve" | "reject",
+): Promise<void> {
+  if (!isAgentRuntimeConfigured) {
+    throw new ApiError(
+      "INTERNAL_ERROR",
+      "The agent runtime is not configured on the server.",
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(
+      `${env.DEVROOM_AGENT_SERVICE_URL}/internal/runs/${runId}/resume`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Token": env.DEVROOM_AGENT_SERVICE_TOKEN,
+        },
+        body: JSON.stringify({ decision }),
+        cache: "no-store",
+      },
+    );
+  } catch (err) {
+    console.error("[agent] runtime unreachable (resume):", err);
+    throw new ApiError(
+      "INTERNAL_ERROR",
+      "Could not reach the agent runtime service.",
+    );
+  }
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    console.error("[agent] runtime rejected resume:", res.status, detail);
+    throw new ApiError(
+      "INTERNAL_ERROR",
+      "The agent runtime rejected the approval decision.",
+    );
+  }
+}

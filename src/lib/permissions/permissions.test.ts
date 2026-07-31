@@ -62,4 +62,10 @@ describe("permissions matrix", () => {
     expect(can("ENGINEER", "run:read")).toBe(true);
     expect(can("VIEWER", "run:read")).toBe(true);
   });
+
+  it("Stage 3: OWNER and ENGINEER can approve a plan; VIEWER cannot", () => {
+    expect(can("OWNER", "run:approve")).toBe(true);
+    expect(can("ENGINEER", "run:approve")).toBe(true);
+    expect(can("VIEWER", "run:approve")).toBe(false);
+  });
 });

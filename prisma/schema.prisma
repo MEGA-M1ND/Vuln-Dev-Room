@@ -37,6 +37,9 @@ enum TicketPriority {
 enum AgentRunStatus {
   QUEUED
   RUNNING
+  // Stage 3: the agent has produced a plan and is paused before writing any
+  // files, waiting for a human approve/reject decision.
+  AWAITING_APPROVAL
   SUCCEEDED
   FAILED
   CANCELLED
@@ -55,12 +58,17 @@ enum RunEventType {
   SANDBOX_PREPARED
   REPOSITORY_INSPECTED
   PLAN_CREATED
+  // Stage 3: human-in-the-loop approval gate.
+  APPROVAL_REQUESTED
+  PLAN_APPROVED
+  PLAN_REJECTED
   FILE_PATCHED
   TESTS_STARTED
   TESTS_FINISHED
   DIFF_CAPTURED
   RUN_SUCCEEDED
   RUN_FAILED
+  RUN_CANCELLED
 }
 
 model User {

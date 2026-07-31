@@ -22,7 +22,9 @@ export type RoomAction =
   | "presence:view"
   // Stage 2: agent runs.
   | "run:create"
-  | "run:read";
+  | "run:read"
+  // Stage 3: approve/reject a paused agent plan.
+  | "run:approve";
 
 const OWNER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "room:read",
@@ -38,6 +40,7 @@ const OWNER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "presence:view",
   "run:create",
   "run:read",
+  "run:approve",
 ]);
 
 const ENGINEER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
@@ -51,6 +54,7 @@ const ENGINEER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "presence:view",
   "run:create",
   "run:read",
+  "run:approve",
 ]);
 
 // Stage 1 decision: VIEWERs MAY add comments (documented in README). They can

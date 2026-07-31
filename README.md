@@ -384,15 +384,68 @@ runtime), never a filesystem path or URL.
 - Runs need Docker + the runtime service; without them the agent panel shows a
   clear "not configured" state and no run can silently execute on the host.
 
-## Recommended first task for Stage 3
+## Stage 3 — Real-time visibility + plan approval
 
-**Add realtime run streaming and the first human-in-the-loop control.** Stream
-`RunEvent`s to the room over the existing Liveblocks broadcast channel (replacing
-polling) and add a LangGraph interrupt before `apply_edits` so an OWNER can
-**approve or reject** a plan before any file is written — reusing the Stage 2
-checkpointing (the graph can resume from the `langgraph` checkpoint) and the
-Stage 1 presence/invalidation plumbing. This is the foundation for redirects,
-pause/resume and takeover.
+Stage 3 makes agent runs a **shared, controllable** activity: the whole room
+watches a run live, and a human approves the plan before any file is written.
+
+**Plan approval gate (human-in-the-loop).** The LangGraph graph is compiled with
+`interrupt_before=["apply_edits"]`, so after planning it **pauses before writing
+anything** and the run enters `AWAITING_APPROVAL` with the plan recorded. An
+OWNER/ENGINEER (`run:approve`) then:
+
+- **Approves** → the runtime prepares a fresh sandbox at the same base revision
+  and resumes the graph from the checkpoint, applying *exactly the approved
+  plan* → tests → diff → summary → `SUCCEEDED`.
+- **Rejects** → the run ends `CANCELLED`, **nothing is written**, and the
+  ticket's single-active slot is released.
+
+Because the interrupt fires before `apply_edits`, a rejected plan can never have
+touched a file — verified in tests and the demo (only a `PLAN` artifact exists
+at the gate; no `FILE_PATCHED` event until approval).
+
+**Real-time visibility.** After every status/event change the runtime pings the
+web app's token-authed internal callback (`POST /api/internal/agent-callback`),
+which broadcasts a lightweight `RUN_UPDATED` signal to the room over the existing
+Liveblocks channel — clients then refetch the authoritative run (Liveblocks stays
+signal-only). The ticket's **Coding agent** panel shows a live activity timeline
+and the approve/reject controls. Polling remains the fallback when Liveblocks
+isn't configured, so the flow works either way.
+
+### Data model / API (added)
+
+- `AgentRunStatus += AWAITING_APPROVAL`; `RunEventType +=` `APPROVAL_REQUESTED`,
+  `PLAN_APPROVED`, `PLAN_REJECTED`, `RUN_CANCELLED` (migration
+  `stage3_approval_gate`). `AWAITING_APPROVAL` still holds the ticket's active
+  slot (a new run is rejected with 409 until it resolves).
+- `POST /api/runs/[runId]/decision` (authz `run:approve`; only when
+  `AWAITING_APPROVAL`) · `GET /api/runs/[runId]/events` (activity timeline) ·
+  `POST /api/internal/agent-callback` (internal, token-authed broadcast) ·
+  runtime `POST /internal/runs/{id}/resume`.
+
+### Stage 3 tests
+
+- **TypeScript** (`npm test`): `run:approve` authorization and an integration
+  test that an `AWAITING_APPROVAL` run still blocks a new run.
+- **Python** (`python -m pytest -q`): the graph **pauses before writing** with
+  the plan ready and no `FILE_PATCHED`, then resumes to a real diff on approval;
+  resume-endpoint guards (401 / 404 / 409) and the reject transition.
+
+### Stage 3 limitations
+
+- Realtime streaming needs a Liveblocks key + the callback URL; otherwise the
+  room updates by polling (functionally identical, just not instant).
+- Human control this stage is the **plan approval gate** only — cancel of a
+  running (non-gated) run, mid-run redirects, and takeover are intentionally not
+  included, but the checkpoint/notifier/permission seams are built to extend.
+
+## Recommended first task for Stage 4
+
+**Cancel + redirect on top of the approval seam.** Add a cooperative cancel
+(authorized user stops a QUEUED/RUNNING/awaiting run; the runtime tears down the
+sandbox and marks it `CANCELLED`) and a "redirect" that injects human guidance
+into the checkpointed state and re-plans before the gate — both reuse the Stage 3
+resume/notifier machinery and the `run:approve` authorization surface.
 
 ---
 

@@ -40,13 +40,31 @@ Next.js server ──(X-Internal-Token)──▶ FastAPI /internal/runs
 
 ## Endpoints
 
-| Method + path                 | Auth     | Purpose                                    |
-| ----------------------------- | -------- | ------------------------------------------ |
-| `GET  /health`                | none     | Liveness; exposes no secrets/paths/config  |
-| `POST /internal/runs`         | internal | Start a run (durable row created by web)   |
-| `GET  /internal/runs/{runId}` | internal | Agent-side run state (reconciliation)      |
+| Method + path                        | Auth     | Purpose                                   |
+| ------------------------------------ | -------- | ----------------------------------------- |
+| `GET  /health`                       | none     | Liveness; exposes no secrets/paths/config |
+| `POST /internal/runs`                | internal | Start a run (durable row created by web)  |
+| `GET  /internal/runs/{runId}`        | internal | Agent-side run state (reconciliation)     |
+| `POST /internal/runs/{runId}/resume` | internal | Stage 3: approve/reject the plan gate     |
 
 There is **no** endpoint to run an arbitrary command or prompt.
+
+## Stage 3: approval gate + realtime
+
+The graph is compiled with `interrupt_before=["apply_edits"]`, so after planning
+it **pauses before any file is written** and the run becomes `AWAITING_APPROVAL`.
+The proposed edits are already in the checkpointed state.
+
+- **Approve** (`POST /internal/runs/{id}/resume {decision:"approve"}`): a *fresh*
+  sandbox is prepared at the same base revision and the graph resumes from the
+  checkpoint, applying exactly the approved edits → tests → diff → summary.
+- **Reject** (`{decision:"reject"}`): terminal, writes nothing, run → `CANCELLED`.
+
+After every status/event change the runtime pings the web app's internal
+callback (`DEVROOM_WEB_CALLBACK_URL`, authed with the service token), which
+broadcasts a lightweight `RUN_UPDATED` signal to the room over Liveblocks so
+clients refetch live. Best-effort — Postgres remains the source of truth, and
+the web UI polls as a fallback when Liveblocks isn't configured.
 
 ## Sandbox security
 
