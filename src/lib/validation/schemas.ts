@@ -96,6 +96,55 @@ export const updateTicketSchema = z
   );
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
 
+// --- Agent run controls (MVP Phase 1) ----------------------------------------
+
+/** Free-text guidance a human gives a running agent. */
+export const redirectRunSchema = z.object({
+  guidance: z
+    .string()
+    .trim()
+    .min(1, "Guidance is required")
+    .max(2000, "Guidance must be 2000 characters or fewer"),
+});
+export type RedirectRunInput = z.infer<typeof redirectRunSchema>;
+
+export const cancelRunSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+export type CancelRunInput = z.infer<typeof cancelRunSchema>;
+
+export const handoffRunSchema = z.object({
+  toUserId: z.string().cuid("A valid room member must be selected"),
+  reason: z.string().trim().max(500).optional(),
+});
+export type HandoffRunInput = z.infer<typeof handoffRunSchema>;
+
+// --- Delivery + reuse (MVP Phase 3/4) ----------------------------------------
+
+export const createPullRequestSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().max(5000).optional(),
+});
+export type CreatePullRequestInput = z.infer<typeof createPullRequestSchema>;
+
+export const createPlaybookSchema = z.object({
+  sourceRunId: z.string().cuid().optional(),
+  title: z.string().trim().min(1, "Title is required").max(160),
+  description: z.string().trim().max(2000).optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(10).default([]),
+  templatePrompt: z
+    .string()
+    .trim()
+    .min(1, "A task template is required")
+    .max(5000),
+  planTemplate: z.string().trim().max(10000).optional(),
+});
+export type CreatePlaybookInput = z.infer<typeof createPlaybookSchema>;
+
+export const updatePlaybookSchema = z.object({
+  isArchived: z.boolean(),
+});
+
 export const moveTicketSchema = z.object({
   status: ticketStatusSchema,
   // New position within the target column. Optional — server appends to end

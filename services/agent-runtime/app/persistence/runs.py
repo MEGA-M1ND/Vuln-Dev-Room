@@ -127,3 +127,69 @@ def append_event(
             )
         conn.commit()
     return sequence
+
+
+def get_cancel_requested(run_id: str) -> bool:
+    """True when a human has asked this run to stop.
+
+    The runtime polls this at safe checkpoints so cancellation is cooperative:
+    work stops between graph nodes, never mid-write.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT "cancelRequestedAt" FROM "AgentRun" WHERE "id" = %s',
+                (run_id,),
+            )
+            row = cur.fetchone()
+            return bool(row and row[0] is not None)
+
+
+def take_pending_redirects(run_id: str) -> list[dict[str, Any]]:
+    """Claim all PENDING redirect interventions for this run.
+
+    Marks them APPLIED in the same transaction so guidance is consumed exactly
+    once, then returns them for the agent to incorporate.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT "id","guidance","authorUserId"
+                FROM "RunIntervention"
+                WHERE "runId" = %s AND "kind" = 'REDIRECT' AND "status" = 'PENDING'
+                ORDER BY "createdAt" ASC
+                FOR UPDATE
+                """,
+                (run_id,),
+            )
+            rows = cur.fetchall()
+            if not rows:
+                conn.commit()
+                return []
+            ids = [r[0] for r in rows]
+            cur.execute(
+                """
+                UPDATE "RunIntervention"
+                SET "status" = 'APPLIED', "appliedAt" = %s
+                WHERE "id" = ANY(%s)
+                """,
+                (_now(), ids),
+            )
+        conn.commit()
+    return [{"id": r[0], "guidance": r[1], "authorUserId": r[2]} for r in rows]
+
+
+def has_pending_redirect(run_id: str) -> bool:
+    """Whether guidance is waiting to be consumed (checked at checkpoints)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1 FROM "RunIntervention"
+                WHERE "runId" = %s AND "kind" = 'REDIRECT' AND "status" = 'PENDING'
+                LIMIT 1
+                """,
+                (run_id,),
+            )
+            return cur.fetchone() is not None

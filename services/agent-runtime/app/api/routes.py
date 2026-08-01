@@ -19,12 +19,13 @@ from app.api.schemas import (
     CreateRunRequest,
     CreateRunResponse,
     HealthResponse,
+    ControlResponse,
     ResumeRunRequest,
     ResumeRunResponse,
     RunStateResponse,
 )
 from app.config import RepositoryConfig, Settings, get_settings
-from app.graph.backend_agent import RunRequest, resume_run, start_run
+from app.graph.backend_agent import RunRequest, replan_run, resume_run, start_run
 from app.notifier import Notifier
 from app.persistence import runs as runs_db
 from app.sandbox.docker_sandbox import ensure_docker_available
@@ -80,6 +81,10 @@ def _execute_start(request: RunRequest, settings: Settings, notifier: Notifier) 
 
 def _execute_resume(request: RunRequest, settings: Settings, notifier: Notifier) -> None:
     resume_run(request, settings, notifier=notifier)
+
+
+def _execute_replan(request: RunRequest, settings: Settings, notifier: Notifier) -> None:
+    replan_run(request, settings, notifier=notifier)
 
 
 @router.post(
@@ -183,6 +188,69 @@ def resume_run_endpoint(
     )
     background.add_task(_execute_resume, run_request, settings, notifier)
     return ResumeRunResponse(runId=run_id, status="RUNNING", accepted=True)
+
+
+@router.post(
+    "/internal/runs/{run_id}/cancel",
+    response_model=ControlResponse,
+    dependencies=[Depends(require_service_token)],
+)
+def cancel_run_endpoint(run_id: str) -> ControlResponse:
+    """Acknowledge a cancellation request.
+
+    The web app has already persisted `cancelRequestedAt`; the executing graph
+    observes it at its next safe checkpoint and tears the sandbox down. A run
+    that is not executing (queued but not started, or already finished) simply
+    converges — this endpoint never forces a terminal status itself.
+    """
+    run = runs_db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    return ControlResponse(runId=run_id, status=str(run["status"]), accepted=True)
+
+
+@router.post(
+    "/internal/runs/{run_id}/redirect",
+    response_model=ControlResponse,
+    dependencies=[Depends(require_service_token)],
+)
+def redirect_run_endpoint(
+    run_id: str,
+    background: BackgroundTasks,
+    settings: Settings = Depends(get_settings),
+) -> ControlResponse:
+    """Pick up pending human guidance.
+
+    A run parked at the approval gate is re-planned immediately (the pending
+    approval is already invalidated by the web app). A still-executing run
+    consumes the guidance at its next planning checkpoint, so nothing to do here.
+    """
+    run = runs_db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+
+    current = str(run["status"])
+    if current in ("SUCCEEDED", "FAILED", "CANCELLED"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run has finished (status={current}).",
+        )
+
+    repo = settings.repository(str(run["targetRepositoryKey"]))
+    if repo is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown repository key.")
+
+    run_request = _build_run_request(
+        run,
+        repo,
+        title="",
+        description="",
+        allowed_paths=_intersect_allowed([], repo.allowed_paths),
+    )
+    background.add_task(
+        _execute_replan, run_request, settings, _notifier_for(settings, run)
+    )
+    return ControlResponse(runId=run_id, status="RUNNING", accepted=True)
 
 
 @router.get(

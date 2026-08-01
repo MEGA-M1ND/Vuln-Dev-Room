@@ -53,3 +53,11 @@ class HealthResponse(BaseModel):
     dockerAvailable: bool
     modelProvider: str
     repositoryCount: int
+
+
+class ControlResponse(BaseModel):
+    """Response for the Phase 1 control endpoints (cancel / redirect)."""
+
+    runId: str
+    status: str
+    accepted: bool

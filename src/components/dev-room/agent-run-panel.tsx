@@ -12,7 +12,10 @@ import type {
   RunDTO,
   RunArtifactDTO,
   RunEventDTO,
+  RunInterventionDTO,
 } from "@/lib/agent/types";
+import { RunControls, RunOwnerBadge } from "@/components/dev-room/run-controls";
+import { RunElapsed } from "@/components/dev-room/run-elapsed";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -54,6 +57,13 @@ const EVENT_LABEL: Record<string, string> = {
   RUN_SUCCEEDED: "Run succeeded",
   RUN_FAILED: "Run failed",
   RUN_CANCELLED: "Run cancelled",
+  CANCELLATION_REQUESTED: "Cancellation requested",
+  REDIRECT_REQUESTED: "Redirect requested",
+  REDIRECT_APPLIED: "Guidance applied — re-planning",
+  OWNERSHIP_TRANSFERRED: "Ownership transferred",
+  EDITS_STARTED: "Applying edits",
+  PR_DRAFTED: "Draft pull request created",
+  PLAYBOOK_SAVED: "Saved as playbook",
 };
 
 /**
@@ -70,6 +80,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
   const [run, setRun] = React.useState<RunDTO | null>(null);
   const [artifacts, setArtifacts] = React.useState<RunArtifactDTO[]>([]);
   const [events, setEvents] = React.useState<RunEventDTO[]>([]);
+  const [interventions, setInterventions] = React.useState<RunInterventionDTO[]>([]);
   const [starting, setStarting] = React.useState(false);
   const [deciding, setDeciding] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -83,6 +94,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
     setRun(null);
     setArtifacts([]);
     setEvents([]);
+    setInterventions([]);
     setError(null);
     apiFetch<{ run: RunDTO | null }>(`/api/tickets/${ticketId}/runs`)
       .then((res) => {
@@ -97,14 +109,18 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
   const refetch = React.useCallback(async () => {
     if (!runId) return;
     try {
-      const [r, a, e] = await Promise.all([
+      const [r, a, e, i] = await Promise.all([
         apiFetch<{ run: RunDTO }>(`/api/runs/${runId}`),
         apiFetch<{ artifacts: RunArtifactDTO[] }>(`/api/runs/${runId}/artifacts`),
         apiFetch<{ events: RunEventDTO[] }>(`/api/runs/${runId}/events`),
+        apiFetch<{ interventions: RunInterventionDTO[] }>(
+          `/api/runs/${runId}/interventions`,
+        ),
       ]);
       setRun(r.run);
       setArtifacts(a.artifacts);
       setEvents(e.events);
+      setInterventions(i.interventions);
     } catch {
       /* transient */
     }
@@ -133,6 +149,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
       setRun(res.run);
       setArtifacts([]);
       setEvents([]);
+      setInterventions([]);
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Could not start the run.");
     } finally {
@@ -195,6 +212,13 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
           ) : (
             <span className="text-xs text-muted-foreground">No runs yet</span>
           )}
+          {run ? (
+            <RunElapsed
+              startedAt={run.startedAt}
+              finishedAt={run.finishedAt}
+              live={isActive}
+            />
+          ) : null}
         </div>
         {canRun ? (
           <Button size="sm" onClick={startRun} disabled={starting || isActive}>
@@ -207,6 +231,19 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
         <p role="alert" className="text-sm text-red-600">
           {error}
         </p>
+      ) : null}
+
+      {/* Ownership + human controls */}
+      {run ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <RunOwnerBadge run={run} />
+          <RunControls run={run} onChanged={refetch} />
+        </div>
+      ) : null}
+
+      {/* Guidance the team has given this run */}
+      {interventions.length > 0 ? (
+        <InterventionList interventions={interventions} />
       ) : null}
 
       {/* Approval gate */}
@@ -377,5 +414,57 @@ function ArtifactSection({
       </summary>
       <div className="border-t border-border p-3">{children}</div>
     </details>
+  );
+}
+
+/**
+ * The human steering record for a run: guidance given, hand-offs, and stop
+ * requests. Distinct from ticket comments, which are team discussion.
+ */
+function InterventionList({
+  interventions,
+}: {
+  interventions: RunInterventionDTO[];
+}) {
+  return (
+    <ul className="space-y-1.5">
+      {interventions.map((iv) => (
+        <li
+          key={iv.id}
+          className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs"
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">{iv.author.name}</span>
+            <span className="text-muted-foreground">
+              {iv.kind === "REDIRECT"
+                ? "redirected the agent"
+                : iv.kind === "HANDOFF"
+                  ? "handed off the run"
+                  : "requested cancellation"}
+            </span>
+            {iv.kind === "REDIRECT" ? (
+              <Badge
+                className={
+                  iv.status === "APPLIED"
+                    ? "text-green-700 border-green-300"
+                    : "text-amber-700 border-amber-300"
+                }
+              >
+                {iv.status === "APPLIED" ? "applied" : "pending"}
+              </Badge>
+            ) : null}
+            <span className="ml-auto text-muted-foreground">
+              {new Date(iv.createdAt).toLocaleTimeString()}
+            </span>
+          </div>
+          {iv.guidance ? (
+            <p className="mt-1 whitespace-pre-wrap">“{iv.guidance}”</p>
+          ) : null}
+          {iv.reason ? (
+            <p className="mt-1 text-muted-foreground">{iv.reason}</p>
+          ) : null}
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -69,6 +69,28 @@ enum RunEventType {
   RUN_SUCCEEDED
   RUN_FAILED
   RUN_CANCELLED
+  // MVP Phase 1: human control primitives.
+  CANCELLATION_REQUESTED
+  REDIRECT_REQUESTED
+  REDIRECT_APPLIED
+  OWNERSHIP_TRANSFERRED
+  EDITS_STARTED
+  // MVP Phase 3/4: delivery + reuse.
+  PR_DRAFTED
+  PLAYBOOK_SAVED
+}
+
+/// What kind of human intervention was recorded against a run.
+enum RunInterventionKind {
+  REDIRECT
+  HANDOFF
+  CANCEL
+}
+
+enum RunInterventionStatus {
+  PENDING
+  APPLIED
+  REJECTED
 }
 
 model User {
@@ -84,6 +106,10 @@ model User {
   createdTickets   Ticket[]         @relation("TicketCreatedBy")
   assignedTickets  Ticket[]         @relation("TicketAssignee")
   requestedRuns    AgentRun[]       @relation("RunRequestedBy")
+  ownedRuns        AgentRun[]       @relation("RunOwnedBy")
+  interventions    RunIntervention[] @relation("InterventionAuthor")
+  createdPlaybooks Playbook[]       @relation("PlaybookCreatedBy")
+  githubConnections GitHubConnection[] @relation("GitHubConnectionCreatedBy")
 
   @@index([email])
 }
@@ -98,10 +124,13 @@ model Room {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  createdBy   User             @relation("RoomCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
-  memberships RoomMembership[]
-  tickets     Ticket[]
-  agentRuns   AgentRun[]
+  createdBy        User                   @relation("RoomCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  memberships      RoomMembership[]
+  tickets          Ticket[]
+  agentRuns        AgentRun[]
+  playbooks        Playbook[]
+  githubConnection GitHubConnection?
+  repositories     RepositoryConnection[]
 
   @@index([createdById])
 }
@@ -157,6 +186,10 @@ model AgentRun {
   roomId              String
   ticketId            String
   requestedById       String
+  // Phase 1: who is currently responsible for this run. Starts as the
+  // requester and changes on hand-off. Does NOT gate other authorized members'
+  // safety controls (any OWNER/ENGINEER may still cancel).
+  ownerUserId         String?
   agentId             String         @default("backend-agent")
   status              AgentRunStatus @default(QUEUED)
   graphThreadId       String         @unique
@@ -168,6 +201,12 @@ model AgentRun {
   finishedAt          DateTime?
   errorCode           String?
   errorSummary        String?
+  // Phase 1: cooperative cancellation. Set when a human requests a stop; the
+  // runtime observes it at the next safe checkpoint and tears down.
+  cancelRequestedAt   DateTime?
+  cancelRequestedById String?
+  // Phase 4: the playbook this run was started from, if any.
+  playbookId          String?
   // Bumped on every status change (a lightweight change token for polling).
   runVersion          Int            @default(1)
   createdAt           DateTime       @default(now())
@@ -179,15 +218,48 @@ model AgentRun {
   // runs for the same ticket are impossible even under concurrency.
   activeTicketId String? @unique
 
-  room        Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  ticket      Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  requestedBy User          @relation("RunRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
-  artifacts   RunArtifact[]
-  events      RunEvent[]
+  room          Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  ticket        Ticket            @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  requestedBy   User              @relation("RunRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
+  owner         User?             @relation("RunOwnedBy", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  playbook      Playbook?         @relation("PlaybookRuns", fields: [playbookId], references: [id], onDelete: SetNull)
+  artifacts     RunArtifact[]
+  events        RunEvent[]
+  interventions RunIntervention[]
+  pullRequest   PullRequestLink?
+  savedPlaybook Playbook?         @relation("PlaybookSourceRun")
 
   @@index([ticketId, createdAt])
   @@index([roomId])
   @@index([status])
+  // Metrics: bounded aggregation by room/status over a date window.
+  @@index([roomId, status, createdAt])
+  @@index([ticketId, status])
+  @@index([ownerUserId])
+}
+
+/// An auditable human intervention against a run (redirect, hand-off, cancel).
+/// Durable and append-only: this is the record of who steered the agent and why.
+model RunIntervention {
+  id           String                @id @default(cuid())
+  runId        String
+  authorUserId String
+  kind         RunInterventionKind
+  status       RunInterventionStatus @default(PENDING)
+  /// REDIRECT: the guidance text a human gave the agent.
+  guidance     String?
+  /// HANDOFF: previous and new run owner.
+  fromUserId   String?
+  toUserId     String?
+  reason       String?
+  createdAt    DateTime              @default(now())
+  appliedAt    DateTime?
+
+  run    AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  author User     @relation("InterventionAuthor", fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+  @@index([runId, kind, status])
 }
 
 /// Append-only durable output of a run (plan, diff, test result, summary, log).
@@ -207,6 +279,106 @@ model RunArtifact {
   // Monotonic, unique sequence per run — also prevents accidental duplicates.
   @@unique([runId, sequence])
   @@index([runId, type])
+}
+
+/// A reusable, sanitized recipe distilled from a successful run.
+/// Deliberately stores a *recipe*, never secrets, host paths, sandbox ids or a
+/// full private diff.
+model Playbook {
+  id                     String   @id @default(cuid())
+  roomId                 String
+  createdById            String
+  /// The successful run this playbook was distilled from (at most one).
+  sourceRunId            String?  @unique
+  title                  String
+  description            String?
+  /// Simple string tags; Postgres text[] keeps filtering cheap without a join.
+  tags                   String[] @default([])
+  agentId                String   @default("backend-agent")
+  repositoryConnectionId String?
+  /// The reusable task instruction template shown to the next user.
+  templatePrompt         String
+  /// A sanitized outline of the plan that worked.
+  planTemplate           String?
+  /// Safe, non-secret metadata (e.g. approval expectations, test summary).
+  policyJson             Json?
+  usageCount             Int      @default(0)
+  isArchived             Boolean  @default(false)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  room                 Room                  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdBy            User                  @relation("PlaybookCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  sourceRun            AgentRun?             @relation("PlaybookSourceRun", fields: [sourceRunId], references: [id], onDelete: SetNull)
+  repositoryConnection RepositoryConnection? @relation(fields: [repositoryConnectionId], references: [id], onDelete: SetNull)
+  runs                 AgentRun[]            @relation("PlaybookRuns")
+
+  @@index([roomId, isArchived, updatedAt])
+}
+
+/// A room's connection to GitHub. Credential material is NEVER serialized to
+/// the browser and is referenced indirectly (see lib/github/credentials).
+model GitHubConnection {
+  id             String   @id @default(cuid())
+  roomId         String   @unique
+  /// GitHub App installation id or account login, depending on auth mode.
+  accountLogin   String
+  installationId String?
+  /// Opaque reference to server-side credential storage. For local development
+  /// this is the literal sentinel "env:GITHUB_TOKEN" (never the token itself).
+  credentialRef  String
+  createdById    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  room         Room                   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdBy    User                   @relation("GitHubConnectionCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  repositories RepositoryConnection[]
+
+  @@index([roomId])
+}
+
+/// A specific GitHub repository a room may open draft PRs against.
+model RepositoryConnection {
+  id            String   @id @default(cuid())
+  roomId        String
+  provider      String   @default("GITHUB")
+  owner         String
+  repo          String
+  defaultBranch String   @default("main")
+  connectionId  String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  room       Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  connection GitHubConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  playbooks  Playbook[]
+
+  @@unique([roomId, owner, repo])
+  @@index([roomId, isActive])
+}
+
+/// The draft pull request opened from a successful run. One per run.
+model PullRequestLink {
+  id         String   @id @default(cuid())
+  runId      String   @unique
+  provider   String   @default("GITHUB")
+  owner      String
+  repo       String
+  number     Int
+  url        String
+  headBranch String
+  baseBranch String
+  commitSha  String?
+  state      String   @default("draft")
+  createdById String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
 }
 
 /// Append-only event log for a run (state transitions, tool activity).
