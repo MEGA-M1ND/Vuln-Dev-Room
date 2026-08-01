@@ -17,6 +17,7 @@ import type {
 import { RunControls, RunOwnerBadge } from "@/components/dev-room/run-controls";
 import { RunElapsed } from "@/components/dev-room/run-elapsed";
 import { RunWatchers } from "@/components/dev-room/run-watchers";
+import { RunDelivery } from "@/components/dev-room/run-delivery";
 import { useCoalescedCallback } from "@/lib/client/use-coalesced-callback";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -341,6 +342,8 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
           repository <code>{run.targetRepositoryKey}</code>
         </p>
       ) : null}
+
+      {run ? <RunDelivery run={run} /> : null}
 
       {artifacts.length > 0 ? <ArtifactViews artifacts={artifacts} /> : null}
     </div>

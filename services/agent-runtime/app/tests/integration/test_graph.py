@@ -78,3 +78,42 @@ def test_backend_agent_graph_end_to_end(docker_required, demo_repo):
             assert expected in event_types
     finally:
         sandbox.cleanup()
+
+
+def test_diff_artifact_records_reviewed_file_contents(docker_required, demo_repo):
+    """Delivery applies the reviewed content, so the run must record it.
+
+    The DIFF artifact carries both the human-readable diff and the exact file
+    contents that were approved and applied — never a reconstruction.
+    """
+    settings = get_settings()
+    sandbox = DockerSandbox(settings)
+    recorder = CollectingRecorder()
+    try:
+        sandbox.prepare_repository(demo_repo)
+        toolset = Toolset(
+            sandbox=sandbox,
+            allowed_paths=["backend/**", "tests/**"],
+            test_command="python -m pytest -q",
+        )
+        ctx = RunContext(
+            toolset=toolset, model=FakeModel(), language="python", recorder=recorder
+        )
+        graph = _build_graph(ctx, MemorySaver())
+        cfg = {"configurable": {"thread_id": "diff-json-1"}}
+        graph.invoke(
+            {"run_id": "r", "ticket_title": "Implement", "ticket_description": ""},
+            config=cfg,
+        )
+        graph.invoke(None, config=cfg)  # approve the gate
+
+        diff_artifacts = [a for a in recorder.artifacts if a["type"] == "DIFF"]
+        assert len(diff_artifacts) == 1
+        payload = diff_artifacts[0]["content_json"]
+        files = payload["files"]
+        assert [f["path"] for f in files] == ["backend/rate_limiter.py"]
+        # The recorded content is the applied implementation, not the stub.
+        assert "return self._consume()" in files[0]["content"]
+        assert "raise NotImplementedError" not in files[0]["content"]
+    finally:
+        sandbox.cleanup()

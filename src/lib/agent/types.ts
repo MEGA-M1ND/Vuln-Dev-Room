@@ -69,3 +69,26 @@ export type RunArtifactDTO = {
   sequence: number;
   createdAt: string;
 };
+
+/**
+ * A draft pull request opened from a run. Contains only public repository
+ * coordinates — never credentials, tokens or the connection's internal ids.
+ */
+export type PullRequestDTO = {
+  owner: string;
+  repo: string;
+  number: number;
+  url: string;
+  headBranch: string;
+  baseBranch: string;
+  state: string;
+  commitSha: string | null;
+  createdAt: string;
+};
+
+export type PullRequestChecksDTO = {
+  state: string;
+  total: number;
+  passed: number;
+  failed: number;
+};

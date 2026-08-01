@@ -245,11 +245,26 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
     def capture_diff(state: AgentState) -> dict[str, Any]:
         _checkpoint(ctx)
         diff = ctx.toolset.get_git_diff()
+        # Alongside the human-readable diff, record the exact reviewed content
+        # of each changed file. Delivery (Phase 3) applies THIS, so a pull
+        # request always carries precisely what a human approved — never a
+        # reconstruction of the diff or an arbitrary later workspace state.
+        applied_paths = state.get("applied_paths", [])
+        by_path = {
+            edit["path"]: edit["new_content"]
+            for edit in state.get("proposed_edits", [])
+        }
+        reviewed_files = [
+            {"path": path, "content": by_path[path]}
+            for path in applied_paths
+            if path in by_path
+        ]
         ctx.recorder.artifact(
             "DIFF",
             "Unified diff",
             content_text=diff,
-            metadata_json={"changedFiles": state.get("applied_paths", [])},
+            content_json={"files": reviewed_files},
+            metadata_json={"changedFiles": applied_paths},
         )
         ctx.recorder.event("DIFF_CAPTURED", {"bytes": len(diff)})
         return {"diff_text": diff}
