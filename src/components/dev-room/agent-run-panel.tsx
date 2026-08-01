@@ -16,6 +16,8 @@ import type {
 } from "@/lib/agent/types";
 import { RunControls, RunOwnerBadge } from "@/components/dev-room/run-controls";
 import { RunElapsed } from "@/components/dev-room/run-elapsed";
+import { RunWatchers } from "@/components/dev-room/run-watchers";
+import { useCoalescedCallback } from "@/lib/client/use-coalesced-callback";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -73,7 +75,7 @@ const EVENT_LABEL: Record<string, string> = {
  */
 export function AgentRunPanel({ ticketId }: { ticketId: string }) {
   const { role, agentEnabled } = useBoard();
-  const { enabled: realtimeEnabled } = usePresence();
+  const { enabled: realtimeEnabled, setActivity } = usePresence();
   const canRun = can(role, "run:create");
   const canApprove = can(role, "run:approve");
 
@@ -126,10 +128,21 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
     }
   }, [runId]);
 
+  // Coalesce broadcast-driven refetches: a busy run emits many events and every
+  // client in the room receives each one.
+  const onRealtimeSignal = useCoalescedCallback(refetch, 400);
+
   // Fetch details whenever we have a run id (and refresh on status changes).
   React.useEffect(() => {
     if (runId) void refetch();
   }, [runId, refetch]);
+
+  // Publish which run this user is watching, so teammates see the audience.
+  React.useEffect(() => {
+    if (!realtimeEnabled) return;
+    setActivity(runId ? "WATCHING_RUN" : null, runId);
+    return () => setActivity(null, null);
+  }, [runId, realtimeEnabled, setActivity]);
 
   // Polling fallback / progress driver while the run is active.
   React.useEffect(() => {
@@ -187,12 +200,18 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
 
   const awaiting = run?.status === "AWAITING_APPROVAL";
   const plan = artifacts.find((a) => a.type === "PLAN");
+  // The newest durable event doubles as the run's current phase.
+  const currentPhase =
+    events.length > 0
+      ? (EVENT_LABEL[events[events.length - 1]!.type] ??
+        events[events.length - 1]!.type)
+      : null;
 
   return (
     <div className="space-y-3">
       {/* Realtime signal bridge (only mounts inside a Liveblocks room). */}
       {realtimeEnabled ? (
-        <RunRealtime runId={runId} onSignal={refetch} />
+        <RunRealtime runId={runId} onSignal={onRealtimeSignal} />
       ) : null}
 
       <div className="flex items-center justify-between gap-2">
@@ -233,10 +252,19 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
         </p>
       ) : null}
 
+      {currentPhase && isActive ? (
+        <p className="text-xs text-muted-foreground">
+          Current phase: <span className="text-foreground">{currentPhase}</span>
+        </p>
+      ) : null}
+
       {/* Ownership + human controls */}
       {run ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <RunOwnerBadge run={run} />
+          <div className="flex items-center gap-3">
+            <RunOwnerBadge run={run} />
+            <RunWatchers runId={run.id} />
+          </div>
           <RunControls run={run} onChanged={refetch} />
         </div>
       ) : null}

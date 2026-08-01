@@ -17,6 +17,8 @@ export type PresenceUser = {
   color: string;
   role: MembershipRole;
   selectedTicketId: string | null;
+  /** The agent run this user is watching, if any. */
+  selectedRunId: string | null;
   activity: string | null;
 };
 
@@ -25,6 +27,10 @@ export type PresenceContextValue = {
   others: PresenceUser[];
   onlineUserIds: Set<string>;
   viewersOf: (ticketId: string) => PresenceUser[];
+  /** Other users currently watching a given agent run. */
+  watchersOf: (runId: string) => PresenceUser[];
+  /** Publish what this user is doing (ephemeral; safe to call often). */
+  setActivity: (activity: string | null, runId?: string | null) => void;
 };
 
 const PresenceContext = React.createContext<PresenceContextValue | null>(null);
@@ -61,6 +67,8 @@ export function StaticPresenceProvider({
       others: [],
       onlineUserIds: new Set<string>(),
       viewersOf: () => [],
+      watchersOf: () => [],
+      setActivity: () => undefined,
     }),
     [],
   );
