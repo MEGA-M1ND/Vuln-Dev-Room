@@ -1,0 +1,17 @@
+[Unit]
+Description=Dev Room agent-runtime (FastAPI)
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=devroom
+WorkingDirectory=/opt/devroom/app/services/agent-runtime
+EnvironmentFile=/opt/devroom/app/services/agent-runtime/.env
+ExecStart=/opt/devroom/app/services/agent-runtime/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8787
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
