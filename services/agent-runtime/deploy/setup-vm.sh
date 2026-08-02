@@ -2,11 +2,12 @@
 # One-time provisioning for the Dev Room agent-runtime on a fresh Ubuntu VM.
 # Run as root (or with sudo). Idempotent-ish: safe to re-run most steps.
 #
-# Usage: sudo bash setup-vm.sh <git-clone-url-with-token> <domain-or-nip.io-host>
+# Usage: sudo bash setup-vm.sh <git-clone-url-with-token> <domain-or-nip.io-host> [branch]
 set -euo pipefail
 
-CLONE_URL="${1:?usage: setup-vm.sh <clone-url> <domain>}"
-DOMAIN="${2:?usage: setup-vm.sh <clone-url> <domain>}"
+CLONE_URL="${1:?usage: setup-vm.sh <clone-url> <domain> [branch]}"
+DOMAIN="${2:?usage: setup-vm.sh <clone-url> <domain> [branch]}"
+BRANCH="${3:-main}"
 
 echo "== apt packages =="
 apt-get update
@@ -32,10 +33,10 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
 
-echo "== clone repo =="
+echo "== clone repo (branch: ${BRANCH}) =="
 mkdir -p /opt/devroom
 if [ ! -d /opt/devroom/app/.git ]; then
-  sudo -u devroom git clone "$CLONE_URL" /opt/devroom/app
+  sudo -u devroom git clone --branch "$BRANCH" "$CLONE_URL" /opt/devroom/app
 fi
 cd /opt/devroom/app/services/agent-runtime
 
