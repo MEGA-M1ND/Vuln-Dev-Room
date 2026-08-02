@@ -1,12 +1,13 @@
 import Link from "next/link";
 
 import { getCurrentUser } from "@/lib/auth/session";
-import { isDevAuthEnabled } from "@/env";
+import { isDevAuthEnabled, isGitHubOAuthConfigured } from "@/env";
 import { prisma } from "@/lib/db/client";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { SignInPanel } from "@/components/auth/sign-in-panel";
 import { SignOutButton } from "@/components/auth/sign-out-button";
+import { GitHubSignInButton } from "@/components/auth/github-sign-in-button";
 
 export default async function HomePage() {
   const user = await getCurrentUser();
@@ -90,10 +91,20 @@ export default async function HomePage() {
             </div>
           ) : isDevAuthEnabled ? (
             <SignInPanel users={seedUsers} />
+          ) : isGitHubOAuthConfigured ? (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-lg font-semibold">Sign in to Dev Room</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Sign in with your GitHub account to continue.
+                </p>
+              </div>
+              <GitHubSignInButton />
+            </div>
           ) : (
             <div className="text-sm text-muted-foreground">
-              Development sign-in is disabled. Configure an authentication
-              provider to sign in.
+              Sign-in is not configured. Set up an authentication provider to
+              sign in.
             </div>
           )}
         </section>

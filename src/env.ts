@@ -19,6 +19,10 @@ const serverSchema = z.object({
     .transform((v) => v === "true"),
   LIVEBLOCKS_SECRET_KEY: z.string().optional().default(""),
 
+  // --- GitHub OAuth sign-in (the only production auth provider) ---
+  AUTH_GITHUB_ID: z.string().optional().default(""),
+  AUTH_GITHUB_SECRET: z.string().optional().default(""),
+
   // --- Stage 2: agent runtime (server-only) ---
   // Base URL of the internal Python agent-runtime service.
   DEVROOM_AGENT_SERVICE_URL: z
@@ -80,6 +84,10 @@ export const isDevAuthEnabled =
   env.NODE_ENV !== "production" && env.DEV_AUTH_ENABLED === true;
 
 export const isLiveblocksConfigured = env.LIVEBLOCKS_SECRET_KEY.length > 0;
+
+/** GitHub OAuth is the only sign-in path available in production. */
+export const isGitHubOAuthConfigured =
+  env.AUTH_GITHUB_ID.length > 0 && env.AUTH_GITHUB_SECRET.length > 0;
 
 /** Whether the agent runtime is wired up (a service token is configured). */
 export const isAgentRuntimeConfigured =

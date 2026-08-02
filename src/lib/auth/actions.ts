@@ -34,6 +34,10 @@ export async function devSignInAction(
   }
 }
 
+export async function githubSignInAction(): Promise<void> {
+  await signIn("github", { redirectTo: "/rooms" });
+}
+
 export async function signOutAction(): Promise<void> {
   await signOut({ redirectTo: "/" });
 }
