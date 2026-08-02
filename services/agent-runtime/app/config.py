@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     model_provider: str = Field(default="fake", alias="DEVROOM_MODEL_PROVIDER")
     model_name: str = Field(default="", alias="DEVROOM_MODEL_NAME")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
 
     # Raw JSON registry of repositories.
     repositories_json: str = Field(default="{}", alias="DEVROOM_REPOSITORIES_JSON")
