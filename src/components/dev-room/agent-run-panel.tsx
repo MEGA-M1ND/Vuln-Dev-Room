@@ -18,6 +18,10 @@ import { RunControls, RunOwnerBadge } from "@/components/dev-room/run-controls";
 import { RunElapsed } from "@/components/dev-room/run-elapsed";
 import { RunWatchers } from "@/components/dev-room/run-watchers";
 import { RunDelivery } from "@/components/dev-room/run-delivery";
+import {
+  SavePlaybookAction,
+  StartWithPlaybook,
+} from "@/components/dev-room/playbook-actions";
 import { useCoalescedCallback } from "@/lib/client/use-coalesced-callback";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -75,7 +79,7 @@ const EVENT_LABEL: Record<string, string> = {
  * the gate, and review the read-only plan / diff / test / summary artifacts.
  */
 export function AgentRunPanel({ ticketId }: { ticketId: string }) {
-  const { role, agentEnabled } = useBoard();
+  const { role, agentEnabled, board } = useBoard();
   const { enabled: realtimeEnabled, setActivity } = usePresence();
   const canRun = can(role, "run:create");
   const canApprove = can(role, "run:approve");
@@ -152,13 +156,15 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
     return () => clearInterval(timer);
   }, [runId, isActive, refetch]);
 
-  async function startRun() {
+  async function startRun(
+    opts: { playbookId?: string; instructions?: string } = {},
+  ) {
     setStarting(true);
     setError(null);
     try {
       const res = await apiFetch<{ run: RunDTO }>(
         `/api/tickets/${ticketId}/runs`,
-        { method: "POST", body: JSON.stringify({}) },
+        { method: "POST", body: JSON.stringify(opts) },
       );
       setRun(res.run);
       setArtifacts([]);
@@ -241,9 +247,20 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
           ) : null}
         </div>
         {canRun ? (
-          <Button size="sm" onClick={startRun} disabled={starting || isActive}>
-            {isActive ? "Running…" : starting ? "Starting…" : "Run backend agent"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <StartWithPlaybook
+              roomId={board.room.id}
+              onStart={(opts) => void startRun(opts)}
+              disabled={starting || isActive}
+            />
+            <Button
+              size="sm"
+              onClick={() => void startRun()}
+              disabled={starting || isActive}
+            >
+              {isActive ? "Running…" : starting ? "Starting…" : "Run backend agent"}
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -341,6 +358,12 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
           <code className="font-mono">{run.baseRevision.slice(0, 10)}</code> ·
           repository <code>{run.targetRepositoryKey}</code>
         </p>
+      ) : null}
+
+      {run && run.status === "SUCCEEDED" ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <SavePlaybookAction run={run} />
+        </div>
       ) : null}
 
       {run ? <RunDelivery run={run} /> : null}

@@ -70,6 +70,16 @@ export function RoomHeader({
             Realtime off
           </span>
         )}
+        <Link href={`/rooms/${room.id}/playbooks`}>
+          <Button variant="outline" size="sm">
+            Playbooks
+          </Button>
+        </Link>
+        <Link href={`/rooms/${room.id}/insights`}>
+          <Button variant="outline" size="sm">
+            Insights
+          </Button>
+        </Link>
         <Button
           variant="outline"
           size="sm"
