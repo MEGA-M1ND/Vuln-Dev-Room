@@ -2,7 +2,11 @@ import { redirect } from "next/navigation";
 
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
-import { isLiveblocksConfigured, isAgentRuntimeConfigured } from "@/env";
+import {
+  isLiveblocksConfigured,
+  isAgentRuntimeConfigured,
+  isDemoMode,
+} from "@/env";
 import { liveblocksRoomId } from "@/lib/liveblocks/server";
 import { listRoomMembers } from "@/lib/rooms/service";
 import { listRoomTickets } from "@/lib/tickets/service";
@@ -73,6 +77,7 @@ export default async function RoomPage({
       liveblocksEnabled={isLiveblocksConfigured}
       liveblocksRoomId={liveblocksRoomId(roomId)}
       agentEnabled={isAgentRuntimeConfigured}
+      demoMode={isDemoMode}
     />
   );
 }

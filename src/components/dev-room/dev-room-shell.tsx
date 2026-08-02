@@ -19,18 +19,21 @@ export function DevRoomShell({
   liveblocksEnabled,
   liveblocksRoomId,
   agentEnabled,
+  demoMode,
 }: {
   initialBoard: BoardDTO;
   currentUserId: string;
   liveblocksEnabled: boolean;
   liveblocksRoomId: string;
   agentEnabled: boolean;
+  demoMode: boolean;
 }) {
   return (
     <BoardProvider
       initialBoard={initialBoard}
       currentUserId={currentUserId}
       agentEnabled={agentEnabled}
+      demoMode={demoMode}
     >
       {liveblocksEnabled ? (
         <LiveblocksRoom roomId={liveblocksRoomId}>

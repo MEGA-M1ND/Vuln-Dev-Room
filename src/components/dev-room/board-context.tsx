@@ -24,6 +24,7 @@ type BoardContextValue = {
   role: MembershipRole;
   currentUserId: string;
   agentEnabled: boolean;
+  demoMode: boolean;
   selectedTicketId: string | null;
   selectTicket: (id: string | null) => void;
   selectedTicket: TicketDTO | null;
@@ -55,11 +56,13 @@ export function BoardProvider({
   initialBoard,
   currentUserId,
   agentEnabled,
+  demoMode,
   children,
 }: {
   initialBoard: BoardDTO;
   currentUserId: string;
   agentEnabled: boolean;
+  demoMode: boolean;
   children: React.ReactNode;
 }) {
   const [board, setBoard] = React.useState<BoardDTO>(initialBoard);
@@ -158,6 +161,7 @@ export function BoardProvider({
     role: board.room.role,
     currentUserId,
     agentEnabled,
+    demoMode,
     selectedTicketId,
     selectTicket: setSelectedTicketId,
     selectedTicket,

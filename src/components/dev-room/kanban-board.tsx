@@ -7,11 +7,12 @@ import { can } from "@/lib/permissions";
 import { STATUS_ORDER } from "@/components/dev-room/ticket-meta";
 import { KanbanColumn } from "@/components/dev-room/kanban-column";
 import { EmptyBoard } from "@/components/dev-room/empty-board";
+import { RoomOnboarding } from "@/components/dev-room/room-onboarding";
 import { TicketDialog } from "@/components/dev-room/ticket-dialog";
 import { Button } from "@/components/ui/button";
 
 export function KanbanBoard() {
-  const { board, role } = useBoard();
+  const { board, role, demoMode } = useBoard();
   const [creating, setCreating] = React.useState(false);
   const canCreate = can(role, "ticket:create");
 
@@ -39,7 +40,10 @@ export function KanbanBoard() {
           </div>
         </div>
       ) : (
-        <EmptyBoard canCreate={canCreate} onCreate={() => setCreating(true)} />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <RoomOnboarding demoMode={demoMode} />
+          <EmptyBoard canCreate={canCreate} onCreate={() => setCreating(true)} />
+        </div>
       )}
 
       <TicketDialog
