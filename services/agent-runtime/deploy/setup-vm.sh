@@ -42,7 +42,7 @@ cd /opt/devroom/app/services/agent-runtime
 echo "== python venv =="
 sudo -u devroom python3.11 -m venv .venv
 sudo -u devroom .venv/bin/pip install --upgrade pip
-sudo -u devroom .venv/bin/pip install -e ".[anthropic]"
+sudo -u devroom .venv/bin/pip install -e ".[openai]"
 
 echo "== sandbox image =="
 docker build -f docker/sandbox.Dockerfile -t devroom-sandbox:prod .

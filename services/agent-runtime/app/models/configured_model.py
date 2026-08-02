@@ -13,14 +13,9 @@ import json
 from app.config import Settings
 from app.models.base import Model, PlanRequest, PlanResult, ProposedEdit
 from app.models.fake_model import FakeModel
-
-_SYSTEM = (
-    "You are backend-agent, a careful backend coding assistant. You are given a "
-    "ticket and excerpts from a repository. Propose a minimal change as STRICT "
-    "JSON with keys: plan (string), summary (string), edits (array of {path, "
-    "new_content, rationale}). Only edit files that were provided to you. Return "
-    "the FULL new content for each edited file. Respond with JSON only."
-)
+from app.models.openai_model import OpenAIModel
+from app.models.prompt import SYSTEM as _SYSTEM
+from app.models.prompt import parse_json_response as _parse_json
 
 
 class ConfiguredModel(Model):
@@ -73,20 +68,6 @@ class ConfiguredModel(Model):
         )
 
 
-def _parse_json(text: str) -> dict:
-    text = text.strip()
-    if text.startswith("```"):
-        # Strip a ```json ... ``` fence if present.
-        text = text.split("```", 2)[1]
-        if text.startswith("json"):
-            text = text[len("json") :]
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1:
-        raise RuntimeError("Model did not return a JSON object.")
-    return json.loads(text[start : end + 1])
-
-
 def build_model(settings: Settings) -> Model:
     """Select the model implementation from configuration."""
     provider = settings.model_provider.lower()
@@ -97,4 +78,9 @@ def build_model(settings: Settings) -> Model:
             raise RuntimeError("ANTHROPIC_API_KEY is required for provider=anthropic.")
         model_name = settings.model_name or "claude-opus-4-8"
         return ConfiguredModel(model_name=model_name, api_key=settings.anthropic_api_key)
+    if provider == "openai":
+        if not settings.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is required for provider=openai.")
+        model_name = settings.model_name or "gpt-5.2"
+        return OpenAIModel(model_name=model_name, api_key=settings.openai_api_key)
     raise RuntimeError(f"Unknown model provider: {settings.model_provider!r}")
