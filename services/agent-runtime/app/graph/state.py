@@ -24,6 +24,9 @@ class AgentState(TypedDict, total=False):
     plan_text: str
     proposed_edits: list[dict[str, Any]]  # {path, new_content, rationale}
     applied_paths: list[str]
+    # Phase 1: human guidance applied to this run so far, oldest first. Kept in
+    # checkpointed state so a resumed/re-planned run never loses it.
+    guidance: list[str]
 
     tests_passed: bool
     tests_output: str

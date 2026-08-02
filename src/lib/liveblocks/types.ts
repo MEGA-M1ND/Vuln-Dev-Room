@@ -11,11 +11,22 @@ import type { RoomBroadcastEvent } from "@/lib/events/types";
  * + Comments/Threads.
  */
 
+/**
+ * What a teammate is currently doing in the room. Purely ephemeral awareness —
+ * never persisted (Postgres owns durable state).
+ */
+export type PresenceActivity =
+  | "WATCHING_RUN"
+  | "WRITING_REDIRECT"
+  | "REVIEWING_PLAN";
+
 /** Ephemeral per-user awareness. Reset when the user leaves or deselects. */
 export type Presence = {
   cursor: { x: number; y: number } | null;
   selectedTicketId: string | null;
-  activity: string | null;
+  /** The agent run this user is currently watching, if any. */
+  selectedRunId: string | null;
+  activity: PresenceActivity | string | null;
 };
 
 /** Immutable, server-authorized identity attached to each connection. */

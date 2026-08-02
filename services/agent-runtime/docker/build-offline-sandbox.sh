@@ -19,11 +19,17 @@ python3 -m pytest --version >/dev/null 2>&1 || {
 }
 
 echo "Importing host rootfs into ${IMAGE_TAG} (this can take a minute)…"
+# NOTE: the members below are relative (`var`, not `./var`), so exclude patterns
+# must be relative too. Excluding `./var/lib/docker` would NOT match and would
+# recursively sweep Docker's own image store into the image, ballooning it and
+# filling the disk.
 tar -C / -c \
-  --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./run \
-  --exclude=./tmp --exclude=./var/lib/docker --exclude=./var/cache \
-  --exclude=./home --exclude=./root/.cache --exclude=./root/.npm \
-  --exclude=./usr/share/doc --exclude=./usr/share/man --exclude=./boot \
+  --exclude=proc --exclude=sys --exclude=dev --exclude=run \
+  --exclude=tmp --exclude=boot --exclude=home \
+  --exclude=var/lib/docker --exclude=var/lib/containerd \
+  --exclude=var/cache --exclude=var/log --exclude=var/tmp \
+  --exclude=root/.cache --exclude=root/.npm \
+  --exclude=usr/share/doc --exclude=usr/share/man \
   bin etc lib lib64 sbin usr var 2>/dev/null \
   | docker import \
       -c 'USER 1000:1000' \

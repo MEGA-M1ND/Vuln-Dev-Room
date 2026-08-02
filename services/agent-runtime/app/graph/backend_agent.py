@@ -12,7 +12,7 @@ injected recorder, so the graph stays deterministic and testable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from langgraph.graph import END, START, StateGraph
 
@@ -95,16 +95,35 @@ class CollectingRecorder:
 # --- run context + nodes ----------------------------------------------------
 
 
+class RunCancelled(Exception):
+    """Raised at a safe checkpoint when a human has requested cancellation.
+
+    Because it is only raised *between* graph nodes, work never stops mid-write.
+    """
+
+
 @dataclass
 class RunContext:
     toolset: Toolset
     model: Model
     language: str
     recorder: Recorder
+    # Phase 1: cooperative cancellation probe. Returns True once a human has
+    # asked the run to stop. Injected so tests can drive it deterministically.
+    should_cancel: Callable[[], bool] = lambda: False
+    # Phase 1: claims pending human guidance (redirects), marking it applied.
+    take_redirects: Callable[[], list[dict[str, Any]]] = lambda: []
+
+
+def _checkpoint(ctx: RunContext) -> None:
+    """Safe cancellation checkpoint, called at the start of every graph node."""
+    if ctx.should_cancel():
+        raise RunCancelled()
 
 
 def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
     def inspect_repository(state: AgentState) -> dict[str, Any]:
+        _checkpoint(ctx)
         tree = ctx.toolset.list_repository()
         excerpts: dict[str, str] = {}
         for path in tree:
@@ -126,10 +145,37 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
         return {"repo_tree": tree, "excerpts": excerpts}
 
     def plan_change(state: AgentState) -> dict[str, Any]:
+        _checkpoint(ctx)
+
+        # Phase 1: fold in any human guidance recorded since the last plan.
+        # Claiming here marks it APPLIED, so guidance is consumed exactly once.
+        applied = ctx.take_redirects()
+        guidance = [
+            str(item.get("guidance") or "").strip()
+            for item in applied
+            if str(item.get("guidance") or "").strip()
+        ]
+        prior_guidance: list[str] = list(state.get("guidance", []))
+        all_guidance = prior_guidance + guidance
+        for item in applied:
+            ctx.recorder.event(
+                "REDIRECT_APPLIED",
+                {"interventionId": item.get("id"), "authorUserId": item.get("authorUserId")},
+            )
+
+        description = state.get("ticket_description", "") or ""
+        if all_guidance:
+            # Human guidance is appended as explicit, attributed instructions.
+            description = (
+                description
+                + "\n\nAdditional guidance from the team:\n"
+                + "\n".join(f"- {g}" for g in all_guidance)
+            )
+
         result = ctx.model.propose_change(
             PlanRequest(
                 title=state.get("ticket_title", ""),
-                description=state.get("ticket_description", "") or "",
+                description=description,
                 language=ctx.language,
                 repo_tree=state.get("repo_tree", []),
                 file_excerpts=state.get("excerpts", {}),
@@ -150,9 +196,17 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
             "plan_text": result.plan_text,
             "proposed_edits": edits,
             "summary_text": result.summary_hint,
+            "guidance": all_guidance,
         }
 
     def apply_edits(state: AgentState) -> dict[str, Any]:
+        # This node is the first that can write. It only ever runs after the
+        # human approval gate (interrupt_before) has been passed.
+        _checkpoint(ctx)
+        ctx.recorder.event(
+            "EDITS_STARTED",
+            {"fileCount": len(state.get("proposed_edits", []))},
+        )
         applied: list[str] = []
         for edit in state.get("proposed_edits", []):
             # Allow-list enforced inside apply_patch; a violation fails the run.
@@ -164,6 +218,7 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
         return {"applied_paths": applied}
 
     def run_tests(state: AgentState) -> dict[str, Any]:
+        _checkpoint(ctx)
         ctx.recorder.event("TESTS_STARTED", {"command": ctx.toolset.test_command})
         outcome = ctx.toolset.run_project_tests()
         ctx.recorder.artifact(
@@ -188,12 +243,28 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
         }
 
     def capture_diff(state: AgentState) -> dict[str, Any]:
+        _checkpoint(ctx)
         diff = ctx.toolset.get_git_diff()
+        # Alongside the human-readable diff, record the exact reviewed content
+        # of each changed file. Delivery (Phase 3) applies THIS, so a pull
+        # request always carries precisely what a human approved — never a
+        # reconstruction of the diff or an arbitrary later workspace state.
+        applied_paths = state.get("applied_paths", [])
+        by_path = {
+            edit["path"]: edit["new_content"]
+            for edit in state.get("proposed_edits", [])
+        }
+        reviewed_files = [
+            {"path": path, "content": by_path[path]}
+            for path in applied_paths
+            if path in by_path
+        ]
         ctx.recorder.artifact(
             "DIFF",
             "Unified diff",
             content_text=diff,
-            metadata_json={"changedFiles": state.get("applied_paths", [])},
+            content_json={"files": reviewed_files},
+            metadata_json={"changedFiles": applied_paths},
         )
         ctx.recorder.event("DIFF_CAPTURED", {"bytes": len(diff)})
         return {"diff_text": diff}
@@ -291,6 +362,8 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
             model=build_model(settings),
             language=request.repo_config.language,
             recorder=recorder,
+            should_cancel=lambda: runs_db.get_cancel_requested(request.run_id),
+            take_redirects=lambda: runs_db.take_pending_redirects(request.run_id),
         )
 
         with checkpointer_context() as checkpointer:
@@ -324,6 +397,8 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
         _notify(notifier, status="AWAITING_APPROVAL")
         return "AWAITING_APPROVAL"
 
+    except RunCancelled:
+        return _cancelled(request.run_id, recorder, notifier)
     except PathNotAllowedError as exc:
         return _fail(request.run_id, recorder, "PATH_NOT_ALLOWED", str(exc), notifier)
     except SandboxUnavailableError as exc:
@@ -366,6 +441,8 @@ def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
             model=build_model(settings),
             language=request.repo_config.language,
             recorder=recorder,
+            should_cancel=lambda: runs_db.get_cancel_requested(request.run_id),
+            take_redirects=lambda: runs_db.take_pending_redirects(request.run_id),
         )
         _ = prepared  # base revision unchanged; kept for clarity
 
@@ -377,6 +454,8 @@ def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
 
         return _finalize(request.run_id, recorder, final_state, notifier)
 
+    except RunCancelled:
+        return _cancelled(request.run_id, recorder, notifier)
     except PathNotAllowedError as exc:
         return _fail(request.run_id, recorder, "PATH_NOT_ALLOWED", str(exc), notifier)
     except SandboxUnavailableError as exc:
@@ -409,6 +488,122 @@ def _finalize(
 def _notify(notifier: Any, *, status: str) -> None:
     if notifier is not None:
         notifier.notify(status=status)
+
+
+def _cancelled(run_id: str, recorder: Recorder, notifier: Any = None) -> str:
+    """Terminal transition for a cooperatively cancelled run.
+
+    Reached only from a safe checkpoint between graph nodes, so no write was in
+    flight. The caller's `finally` tears the sandbox down.
+    """
+    runs_db.update_run_status(
+        run_id,
+        "CANCELLED",
+        error_code="CANCELLED_BY_USER",
+        error_summary="Cancelled by a room member; the sandbox was destroyed.",
+    )
+    recorder.event("RUN_CANCELLED", {"cooperative": True})
+    if notifier is not None:
+        notifier.notify(status="CANCELLED")
+    return "CANCELLED"
+
+
+def replan_run(request: RunRequest, settings: Settings, notifier: Any = None) -> str:
+    """Re-plan a run that was parked at the approval gate when guidance arrived.
+
+    Rewinds the checkpointed graph to just before `plan_change`, so invoking it
+    re-runs planning with the new guidance and stops again at the approval gate.
+    The previously proposed edits are replaced, which is exactly why a redirect
+    invalidates a pending approval: stale instructions can never be applied.
+
+    Planning is a pure model call over already-captured excerpts, so no sandbox
+    is needed. A guard sandbox makes that invariant explicit and fails loudly if
+    a node ever tries to touch the repository here.
+    """
+    recorder = DbRecorder(request.run_id, notifier=notifier)
+    try:
+        if runs_db.get_cancel_requested(request.run_id):
+            return _cancelled(request.run_id, recorder, notifier)
+
+        toolset = Toolset(
+            sandbox=_GuardSandbox(),
+            allowed_paths=request.allowed_paths or request.repo_config.allowed_paths,
+            test_command=request.repo_config.test_command,
+        )
+        ctx = RunContext(
+            toolset=toolset,
+            model=build_model(settings),
+            language=request.repo_config.language,
+            recorder=recorder,
+            should_cancel=lambda: runs_db.get_cancel_requested(request.run_id),
+            take_redirects=lambda: runs_db.take_pending_redirects(request.run_id),
+        )
+
+        with checkpointer_context() as checkpointer:
+            app = _build_graph(ctx, checkpointer)
+            cfg = _thread_config(request)
+            # Rewind: presenting the state "as" inspect_repository makes
+            # plan_change the next node to run.
+            app.update_state(cfg, {}, as_node="inspect_repository")
+            app.invoke(None, config=cfg)
+            state = app.get_state(cfg)
+            proposed = state.values.get("proposed_edits", [])
+
+        if not proposed:
+            runs_db.update_run_status(
+                request.run_id,
+                "FAILED",
+                error_code="NO_ACTIONABLE_PLAN",
+                error_summary="After the redirect the agent proposed no changes.",
+            )
+            recorder.event("RUN_FAILED", {"errorCode": "NO_ACTIONABLE_PLAN"})
+            _notify(notifier, status="FAILED")
+            return "FAILED"
+
+        # Back to the gate: the new plan needs fresh human approval.
+        runs_db.update_run_status(request.run_id, "AWAITING_APPROVAL")
+        recorder.event(
+            "APPROVAL_REQUESTED",
+            {"proposedFiles": [e["path"] for e in proposed], "afterRedirect": True},
+        )
+        _notify(notifier, status="AWAITING_APPROVAL")
+        return "AWAITING_APPROVAL"
+
+    except RunCancelled:
+        return _cancelled(request.run_id, recorder, notifier)
+    except Exception as exc:  # noqa: BLE001
+        return _fail(
+            request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier
+        )
+
+
+class _GuardSandbox:
+    """A sandbox that refuses every operation.
+
+    Used on the re-plan path to enforce "planning must not touch the repository".
+    If a future node breaks that assumption, this fails loudly instead of
+    silently operating on an unprepared workspace.
+    """
+
+    sandbox_id = "guard"
+
+    def _refuse(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise SandboxError(
+            "The re-planning phase must not access the repository sandbox."
+        )
+
+    list_tree = _refuse
+    read_file = _refuse
+    search_repository = _refuse
+    apply_patch = _refuse
+    run_tests = _refuse
+    get_git_diff = _refuse
+    get_git_status = _refuse
+    collect_logs = _refuse
+    prepare_repository = _refuse
+
+    def cleanup(self) -> None:
+        return
 
 
 def _fail(

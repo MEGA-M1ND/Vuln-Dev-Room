@@ -35,6 +35,7 @@ export function LiveblocksRoom({
         initialPresence={{
           cursor: null,
           selectedTicketId: null,
+          selectedRunId: null,
           activity: null,
         }}
       >
@@ -76,7 +77,12 @@ function PresenceBridge({ children }: { children: React.ReactNode }) {
   // On leave/unmount, clear ephemeral presence.
   React.useEffect(() => {
     return () => {
-      updateMyPresence({ cursor: null, selectedTicketId: null, activity: null });
+      updateMyPresence({
+        cursor: null,
+        selectedTicketId: null,
+        selectedRunId: null,
+        activity: null,
+      });
     };
   }, [updateMyPresence]);
 
@@ -101,6 +107,7 @@ function PresenceBridge({ children }: { children: React.ReactNode }) {
       color: other.info?.color ?? "#64748b",
       role: other.info?.role ?? "VIEWER",
       selectedTicketId: other.presence?.selectedTicketId ?? null,
+      selectedRunId: other.presence?.selectedRunId ?? null,
       activity: other.presence?.activity ?? null,
     }));
   }, [others]);
@@ -113,8 +120,15 @@ function PresenceBridge({ children }: { children: React.ReactNode }) {
       onlineUserIds,
       viewersOf: (ticketId: string) =>
         presenceUsers.filter((u) => u.selectedTicketId === ticketId),
+      watchersOf: (runId: string) =>
+        presenceUsers.filter((u) => u.selectedRunId === runId),
+      setActivity: (activity: string | null, runId?: string | null) =>
+        updateMyPresence({
+          activity,
+          ...(runId !== undefined ? { selectedRunId: runId } : {}),
+        }),
     };
-  }, [presenceUsers]);
+  }, [presenceUsers, updateMyPresence]);
 
   return <PresenceProvider value={value}>{children}</PresenceProvider>;
 }

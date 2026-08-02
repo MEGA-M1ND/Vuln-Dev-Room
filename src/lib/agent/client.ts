@@ -101,3 +101,60 @@ export async function resumeAgentRun(
     );
   }
 }
+
+/**
+ * Shared POST helper for internal runtime calls. Keeps token handling and error
+ * shaping in one place; never surfaces runtime internals to the browser.
+ */
+async function postInternal(
+  path: string,
+  body: Record<string, unknown>,
+  what: string,
+): Promise<void> {
+  if (!isAgentRuntimeConfigured) {
+    throw new ApiError(
+      "INTERNAL_ERROR",
+      "The agent runtime is not configured on the server.",
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${env.DEVROOM_AGENT_SERVICE_URL}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Token": env.DEVROOM_AGENT_SERVICE_TOKEN,
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+  } catch (err) {
+    console.error(`[agent] runtime unreachable (${what}):`, err);
+    throw new ApiError(
+      "INTERNAL_ERROR",
+      "Could not reach the agent runtime service.",
+    );
+  }
+
+  // 404/409 are acceptable for control signals: the durable request is already
+  // recorded and the runtime converges (or the run already finished).
+  if (!res.ok && res.status !== 404 && res.status !== 409) {
+    const detail = await res.text().catch(() => "");
+    console.error(`[agent] runtime rejected ${what}:`, res.status, detail);
+    throw new ApiError(
+      "INTERNAL_ERROR",
+      `The agent runtime rejected the ${what} request.`,
+    );
+  }
+}
+
+/** Signal cooperative cancellation; the runtime stops at its next checkpoint. */
+export async function cancelAgentRun(runId: string): Promise<void> {
+  await postInternal(`/internal/runs/${runId}/cancel`, {}, "cancel");
+}
+
+/** Signal that new human guidance is pending for this run. */
+export async function redirectAgentRun(runId: string): Promise<void> {
+  await postInternal(`/internal/runs/${runId}/redirect`, {}, "redirect");
+}

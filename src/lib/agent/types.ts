@@ -1,4 +1,28 @@
-import type { AgentRunStatus, RunArtifactType } from "@prisma/client";
+import type {
+  AgentRunStatus,
+  RunArtifactType,
+  RunInterventionKind,
+  RunInterventionStatus,
+} from "@prisma/client";
+
+export type RunActorDTO = {
+  id: string;
+  name: string;
+  image: string | null;
+};
+
+export type RunInterventionDTO = {
+  id: string;
+  kind: RunInterventionKind;
+  status: RunInterventionStatus;
+  guidance: string | null;
+  reason: string | null;
+  fromUserId: string | null;
+  toUserId: string | null;
+  author: RunActorDTO;
+  createdAt: string;
+  appliedAt: string | null;
+};
 
 /**
  * Browser-safe run DTOs. NOTE: `sandboxId` and any host paths are deliberately
@@ -15,11 +39,11 @@ export type RunDTO = {
   baseRevision: string | null;
   errorCode: string | null;
   errorSummary: string | null;
-  requestedBy: {
-    id: string;
-    name: string;
-    image: string | null;
-  } | null;
+  requestedBy: RunActorDTO | null;
+  /** Who is currently responsible for this run (Phase 1 hand-off). */
+  owner: RunActorDTO | null;
+  /** True once a human has asked the agent to stop. */
+  cancelRequested: boolean;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
@@ -44,4 +68,27 @@ export type RunArtifactDTO = {
   metadataJson: unknown;
   sequence: number;
   createdAt: string;
+};
+
+/**
+ * A draft pull request opened from a run. Contains only public repository
+ * coordinates — never credentials, tokens or the connection's internal ids.
+ */
+export type PullRequestDTO = {
+  owner: string;
+  repo: string;
+  number: number;
+  url: string;
+  headBranch: string;
+  baseBranch: string;
+  state: string;
+  commitSha: string | null;
+  createdAt: string;
+};
+
+export type PullRequestChecksDTO = {
+  state: string;
+  total: number;
+  passed: number;
+  failed: number;
 };

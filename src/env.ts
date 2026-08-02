@@ -34,6 +34,28 @@ const serverSchema = z.object({
     .string()
     .optional()
     .default("agentguard-demo"),
+
+  // --- MVP Phase 3: GitHub delivery (optional, OFF by default) ---
+  // The whole integration is gated on this flag; without it the product runs
+  // exactly as before and the UI shows a clear "not configured" state.
+  DEVROOM_GITHUB_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true"),
+  // Local-development credential path. A GitHub App is the production shape
+  // (see README); this token path is documented as dev-only.
+  GITHUB_TOKEN: z.string().optional().default(""),
+  GITHUB_API_BASE_URL: z
+    .string()
+    .url()
+    .optional()
+    .default("https://api.github.com"),
+
+  // --- MVP Phase 6: demo affordances (never on in production) ---
+  DEVROOM_DEMO_MODE: z
+    .string()
+    .optional()
+    .transform((v) => v === "true"),
 });
 
 const parsed = serverSchema.safeParse(process.env);
@@ -62,3 +84,15 @@ export const isLiveblocksConfigured = env.LIVEBLOCKS_SECRET_KEY.length > 0;
 /** Whether the agent runtime is wired up (a service token is configured). */
 export const isAgentRuntimeConfigured =
   env.DEVROOM_AGENT_SERVICE_TOKEN.length > 0;
+
+/**
+ * GitHub delivery requires BOTH the explicit feature flag and a credential.
+ * Anything less is treated as "not configured" so the UI never implies a
+ * working integration that would fail on use.
+ */
+export const isGitHubConfigured =
+  env.DEVROOM_GITHUB_ENABLED === true && env.GITHUB_TOKEN.length > 0;
+
+/** Demo-only affordances (e.g. sample ticket seeding). Never in production. */
+export const isDemoMode =
+  env.NODE_ENV !== "production" && env.DEVROOM_DEMO_MODE === true;

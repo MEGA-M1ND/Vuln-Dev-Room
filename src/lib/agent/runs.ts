@@ -13,9 +13,16 @@ const ACTIVE_STATUSES = ["QUEUED", "RUNNING", "AWAITING_APPROVAL"] as const;
 type RunWithRequester = Prisma.AgentRunGetPayload<{
   include: {
     requestedBy: { select: { id: true; name: true; image: true } };
+    owner: { select: { id: true; name: true; image: true } };
   };
 }>;
 
+/**
+ * Serialize a run for the browser.
+ *
+ * SECURITY: `sandboxId`, `graphThreadId`, host repository paths and any
+ * credential material are deliberately never included. Tests assert this.
+ */
 function toRunDTO(run: RunWithRequester): RunDTO {
   return {
     id: run.id,
@@ -35,15 +42,19 @@ function toRunDTO(run: RunWithRequester): RunDTO {
           image: run.requestedBy.image,
         }
       : null,
+    owner: run.owner
+      ? { id: run.owner.id, name: run.owner.name, image: run.owner.image }
+      : null,
+    cancelRequested: run.cancelRequestedAt !== null,
     startedAt: run.startedAt?.toISOString() ?? null,
     finishedAt: run.finishedAt?.toISOString() ?? null,
     createdAt: run.createdAt.toISOString(),
-    // sandboxId intentionally omitted — never exposed to the browser.
   };
 }
 
 const runInclude = {
   requestedBy: { select: { id: true, name: true, image: true } },
+  owner: { select: { id: true, name: true, image: true } },
 } satisfies Prisma.AgentRunInclude;
 
 /**
@@ -61,6 +72,8 @@ export async function createAgentRun(params: {
   requestedById: string;
   targetRepositoryKey: string;
   agentId?: string;
+  /** Phase 4: the playbook this run was started from, if any. */
+  playbookId?: string | null;
 }): Promise<RunDTO> {
   const graphThreadId = `thread_${randomUUID()}`;
   const agentId = params.agentId ?? "backend-agent";
@@ -84,6 +97,9 @@ export async function createAgentRun(params: {
           roomId: params.roomId,
           ticketId: params.ticketId,
           requestedById: params.requestedById,
+          // The requester owns the run until it is explicitly handed off.
+          ownerUserId: params.requestedById,
+          playbookId: params.playbookId ?? null,
           agentId,
           status: "QUEUED",
           graphThreadId,

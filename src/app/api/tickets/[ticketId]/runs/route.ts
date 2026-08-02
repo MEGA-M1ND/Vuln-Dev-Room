@@ -8,6 +8,10 @@ import { prisma } from "@/lib/db/client";
 import { env } from "@/env";
 import { createAgentRun, latestRunForTicket } from "@/lib/agent/runs";
 import { startAgentRun } from "@/lib/agent/client";
+import {
+  recordPlaybookUse,
+  requirePlaybookForRun,
+} from "@/lib/playbooks/service";
 
 type Params = { params: Promise<{ ticketId: string }> };
 
@@ -15,6 +19,10 @@ type Params = { params: Promise<{ ticketId: string }> };
 // its registry) — never a filesystem path or URL.
 const createRunSchema = z.object({
   targetRepositoryKey: z.string().trim().min(1).max(100).optional(),
+  /** Phase 4: start from a saved playbook (validated against this room). */
+  playbookId: z.string().cuid().optional(),
+  /** Extra ticket-specific instructions, e.g. playbook variables. */
+  instructions: z.string().trim().max(2000).optional(),
 });
 
 // GET /api/tickets/[ticketId]/runs — latest run for the ticket (members).
@@ -50,22 +58,39 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
     if (!ticket) throw new ApiError("NOT_FOUND", "Ticket not found.");
 
+    // Resolve an optional playbook. Server-verified against this room, so the
+    // browser cannot reference another room's playbook.
+    const playbook = input.playbookId
+      ? await requirePlaybookForRun(roomId, input.playbookId)
+      : null;
+
     // Create the durable run + RUN_CREATED (rejects duplicate active runs).
     const run = await createAgentRun({
       roomId,
       ticketId,
       requestedById: ctx.user.id,
       targetRepositoryKey,
+      playbookId: playbook?.id ?? null,
     });
 
     // Kick off the internal runtime; do NOT await full execution.
     try {
+      // The agent sees the ticket, plus the playbook recipe and any
+      // run-specific instructions the user supplied.
+      const description = [
+        ticket.description?.trim() || "",
+        playbook ? `Playbook guidance:\n${playbook.templatePrompt}` : "",
+        input.instructions ? `Additional instructions:\n${input.instructions}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
       await startAgentRun({
         runId: run.id,
         roomId,
         ticketId,
         title: ticket.title,
-        description: ticket.description,
+        description: description || null,
         agentId: run.agentId,
         targetRepositoryKey,
         // The runtime intersects this with the repo's configured allow-list.
@@ -88,6 +113,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       });
       throw err;
     }
+
+    // Count the reuse only once the run actually started.
+    if (playbook) await recordPlaybookUse(playbook.id);
 
     return NextResponse.json({ run }, { status: 201 });
   } catch (error) {
