@@ -1,4 +1,7 @@
-from app.config import Settings
+import pytest
+from pydantic import ValidationError
+
+from app.config import RepositoryConfig, Settings
 
 
 def test_repository_registry_parses_and_hides_nothing_extra():
@@ -18,6 +21,24 @@ def test_repository_registry_parses_and_hides_nothing_extra():
 def test_unknown_repository_key_returns_none():
     settings = Settings(DEVROOM_REPOSITORIES_JSON="{}")
     assert settings.repository("does-not-exist") is None
+
+
+def test_repository_config_requires_exactly_one_source():
+    with pytest.raises(ValidationError):
+        RepositoryConfig(display_name="neither")
+    with pytest.raises(ValidationError):
+        RepositoryConfig(
+            display_name="both",
+            source_path="/srv/demo",
+            git_url="https://github.com/o/r.git",
+        )
+    # Exactly one is fine, either way.
+    RepositoryConfig(display_name="local", source_path="/srv/demo")
+    RepositoryConfig(display_name="remote", git_url="https://github.com/o/r.git")
+
+
+def test_real_repos_disabled_by_default():
+    assert Settings(DATABASE_URL="postgresql://x/y").real_repos_enabled is False
 
 
 def test_langgraph_url_defaults_to_app_db():

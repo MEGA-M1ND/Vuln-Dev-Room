@@ -12,15 +12,25 @@ import json
 from functools import lru_cache
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class RepositoryConfig(BaseModel):
-    """A single registered, demo repository. `source_path` is host-only."""
+    """A repository the agent may work against.
+
+    Either a static, host-only `source_path` (the demo registry — unchanged
+    since Stage 2) or a `git_url`/`git_ref` pair (Phase 1c: a room's connected
+    GitHub repository). Never both, never neither. When `git_url` is set, the
+    orchestrator clones it on the runtime host (which has network, unlike the
+    agent sandbox) before handing a local directory to `Sandbox.prepare_repository`
+    exactly as today — nothing downstream of that point knows the difference.
+    """
 
     display_name: str
-    source_path: str
+    source_path: str | None = None
+    git_url: str | None = None
+    git_ref: str = "HEAD"
     allowed_paths: list[str] = Field(default_factory=list)
     test_command: str = "pytest -q"
     language: str = "python"
@@ -29,6 +39,14 @@ class RepositoryConfig(BaseModel):
     @classmethod
     def _non_empty_globs(cls, v: list[str]) -> list[str]:
         return [g.strip() for g in v if g.strip()]
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> "RepositoryConfig":
+        if bool(self.source_path) == bool(self.git_url):
+            raise ValueError(
+                "RepositoryConfig requires exactly one of source_path or git_url."
+            )
+        return self
 
 
 class Settings(BaseSettings):
@@ -65,6 +83,14 @@ class Settings(BaseSettings):
 
     # Raw JSON registry of repositories.
     repositories_json: str = Field(default="{}", alias="DEVROOM_REPOSITORIES_JSON")
+
+    # Phase 1c: prefer a room's connected GitHub repository (cloned fresh per
+    # run) over the static registry above. Off by default — every repo
+    # currently configured via DEVROOM_REPOSITORIES_JSON is unaffected until
+    # this is deliberately turned on.
+    real_repos_enabled: bool = Field(default=False, alias="DEVROOM_REAL_REPOS_ENABLED")
+    # Bound on how long a clone may take before the run fails with CLONE_FAILED.
+    clone_timeout: int = Field(default=120, alias="DEVROOM_CLONE_TIMEOUT")
 
     # Stage 3: base URL of the Next.js web app. The runtime calls its internal
     # callback so the web app can broadcast realtime run updates to the room.
