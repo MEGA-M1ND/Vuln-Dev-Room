@@ -107,7 +107,30 @@ on a planted stub makes the credibility problem worse, not better.
 
 Each phase is independently shippable, ends green, and is safe to stop after.
 
-### Phase 0 — Safety net (1–2 days) · do this first
+### Phase 0 — Safety net · DONE except branch protection
+
+Shipped in `.github/workflows/ci.yml`. Run #1 passed both jobs in ~2 minutes:
+
+| | Before | In CI |
+|---|---|---|
+| TypeScript | 40 passing, 57 skipped | **97 passing, 0 skipped** |
+| Python | 27 passing, 8 skipped | **35 passing, 0 skipped** |
+
+The 8 Docker sandbox tests had never executed anywhere before this. A guard
+step greps the pytest report for `Docker not available` and fails the build if
+those tests skip, so the job cannot go green while silently testing nothing.
+
+`tests/unit/env-example.test.ts` asserts `.env.example` documents every
+variable `src/env.ts` and `schema.prisma` read. It caught `AUTH_GITHUB_ID` and
+`AUTH_GITHUB_SECRET` on its first run — added for OAuth, never documented.
+
+**Still outstanding — requires repo admin, cannot be done from code:**
+Settings → Branches → add a rule for `main` requiring the `Web` and
+`Agent runtime` checks to pass before merging.
+
+<details>
+<summary>Original Phase 0 plan</summary>
+
 
 Nothing else is safe without it. There is **no CI in this repo** (no
 `.github/workflows/`). That is precisely why today's session broke production
@@ -127,8 +150,10 @@ would have been caught pre-merge.
    `src/env.ts` requires appears in `.env.example`. Cheap, and prevents the
    "empty `NEXTAUTH_URL` crashes the build" failure permanently.
 
-**Exit criterion:** 130/130 tests execute and pass in CI, and a red build
+**Exit criterion:** every test executes and passes in CI, and a red build
 blocks merge.
+
+</details>
 
 ### Phase 1 — Make the agent work on real repositories (1.5–2 weeks) · the unlock
 

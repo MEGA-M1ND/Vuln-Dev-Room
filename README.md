@@ -1,5 +1,7 @@
 # Dev Room
 
+[![CI](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml/badge.svg)](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml)
+
 **The shared control room for AI coding agents.** Your team watches, steers,
 approves, hands off and ships agent work together — instead of each engineer
 running an agent alone in a private terminal.
