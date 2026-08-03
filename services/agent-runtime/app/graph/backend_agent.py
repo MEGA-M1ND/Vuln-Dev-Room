@@ -12,6 +12,7 @@ injected recorder, so the graph stays deterministic and testable.
 from __future__ import annotations
 
 import logging
+import shutil
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
@@ -379,10 +380,55 @@ class RunRequest:
     ticket_description: str
     repo_config: RepositoryConfig
     allowed_paths: list[str]
+    # Phase 1c: for a connected-repo run, the exact commit a human already
+    # planned/approved against. Set on resume so the fresh sandbox reflects
+    # precisely that commit, never wherever the branch has since moved to.
+    # None on the initial run (there is nothing to pin to yet) and always
+    # None for the static demo registry, which has no notion of a moving ref.
+    pinned_revision: str | None = None
 
 
 def _thread_config(request: RunRequest) -> dict[str, Any]:
     return {"configurable": {"thread_id": request.graph_thread_id}}
+
+
+def _resolve_repository(
+    repo_config: RepositoryConfig, pinned_revision: str | None, settings: Settings
+) -> tuple[RepositoryConfig, Callable[[], None]]:
+    """Turn a RunRequest's RepositoryConfig into one with a real local
+    `source_path`, plus a cleanup callable the caller must run once done with
+    the sandbox.
+
+    The static demo registry (`source_path` already set) passes through
+    unchanged — a no-op, byte-for-byte the behavior before Phase 1c existed.
+    A connected repo (`git_url` set) is cloned onto the runtime host — which
+    has network, unlike the agent sandbox — and its language/test command are
+    detected from the resulting tree.
+    """
+    if repo_config.source_path:
+        return repo_config, lambda: None
+
+    assert repo_config.git_url is not None  # enforced by RepositoryConfig's validator
+    cloned = clone_repository(
+        repo_config.git_url,
+        ref=repo_config.git_ref,
+        pinned_sha=pinned_revision,
+        timeout=settings.clone_timeout,
+    )
+    tree = list_tracked_files(cloned.path)
+    language, test_command = detect_language_and_test_command(tree)
+    effective = RepositoryConfig(
+        display_name=repo_config.display_name,
+        source_path=cloned.path,
+        allowed_paths=repo_config.allowed_paths or ["**"],
+        test_command=test_command,
+        language=language,
+    )
+
+    def cleanup() -> None:
+        shutil.rmtree(cloned.path, ignore_errors=True)
+
+    return effective, cleanup
 
 
 def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> str:
@@ -401,8 +447,12 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
         return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc), notifier)
 
     sandbox = DockerSandbox(settings)
+    cleanup_source: Callable[[], None] = lambda: None
     try:
-        prepared = sandbox.prepare_repository(request.repo_config.source_path)
+        effective_repo, cleanup_source = _resolve_repository(
+            request.repo_config, None, settings
+        )
+        prepared = sandbox.prepare_repository(effective_repo.source_path)
         runs_db.update_run_status(
             request.run_id,
             "RUNNING",
@@ -417,13 +467,13 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
 
         toolset = Toolset(
             sandbox=sandbox,
-            allowed_paths=request.allowed_paths or request.repo_config.allowed_paths,
-            test_command=request.repo_config.test_command,
+            allowed_paths=request.allowed_paths or effective_repo.allowed_paths,
+            test_command=effective_repo.test_command,
         )
         ctx = RunContext(
             toolset=toolset,
             model=build_model(settings),
-            language=request.repo_config.language,
+            language=effective_repo.language,
             recorder=recorder,
             should_cancel=lambda: runs_db.get_cancel_requested(request.run_id),
             take_redirects=lambda: runs_db.take_pending_redirects(request.run_id),
@@ -438,7 +488,7 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
                     "run_id": request.run_id,
                     "ticket_title": request.ticket_title,
                     "ticket_description": request.ticket_description,
-                    "language": request.repo_config.language,
+                    "language": effective_repo.language,
                     "allowed_paths": toolset.allowed_paths,
                 },
                 config=cfg,
@@ -466,6 +516,10 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
         return _fail(request.run_id, recorder, "PATH_NOT_ALLOWED", str(exc), notifier)
     except SandboxUnavailableError as exc:
         return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc), notifier)
+    except RepositorySourceError as exc:
+        return _fail(request.run_id, recorder, "CLONE_FAILED", str(exc), notifier)
+    except UnsupportedRepositoryError as exc:
+        return _fail(request.run_id, recorder, "UNSUPPORTED_REPOSITORY", str(exc), notifier)
     except SandboxSetupError as exc:
         return _fail(request.run_id, recorder, "SETUP_FAILED", str(exc), notifier)
     except Exception as exc:  # noqa: BLE001
@@ -473,6 +527,7 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
         return _fail(request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
     finally:
         sandbox.cleanup()
+        cleanup_source()
 
 
 def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) -> str:
@@ -493,20 +548,26 @@ def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
         return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc), notifier)
 
     sandbox = DockerSandbox(settings)
+    cleanup_source: Callable[[], None] = lambda: None
     try:
-        prepared = sandbox.prepare_repository(request.repo_config.source_path)
+        # Pinned to the exact commit the human already planned/approved
+        # against (a no-op for the static registry, which has no moving ref).
+        effective_repo, cleanup_source = _resolve_repository(
+            request.repo_config, request.pinned_revision, settings
+        )
+        prepared = sandbox.prepare_repository(effective_repo.source_path)
         runs_db.update_run_status(request.run_id, "RUNNING", sandbox_id=sandbox.sandbox_id)
         _record_setup(recorder, prepared)
 
         toolset = Toolset(
             sandbox=sandbox,
-            allowed_paths=request.allowed_paths or request.repo_config.allowed_paths,
-            test_command=request.repo_config.test_command,
+            allowed_paths=request.allowed_paths or effective_repo.allowed_paths,
+            test_command=effective_repo.test_command,
         )
         ctx = RunContext(
             toolset=toolset,
             model=build_model(settings),
-            language=request.repo_config.language,
+            language=effective_repo.language,
             recorder=recorder,
             should_cancel=lambda: runs_db.get_cancel_requested(request.run_id),
             take_redirects=lambda: runs_db.take_pending_redirects(request.run_id),
@@ -527,6 +588,10 @@ def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
         return _fail(request.run_id, recorder, "PATH_NOT_ALLOWED", str(exc), notifier)
     except SandboxUnavailableError as exc:
         return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc), notifier)
+    except RepositorySourceError as exc:
+        return _fail(request.run_id, recorder, "CLONE_FAILED", str(exc), notifier)
+    except UnsupportedRepositoryError as exc:
+        return _fail(request.run_id, recorder, "UNSUPPORTED_REPOSITORY", str(exc), notifier)
     except SandboxSetupError as exc:
         return _fail(request.run_id, recorder, "SETUP_FAILED", str(exc), notifier)
     except Exception as exc:  # noqa: BLE001
@@ -534,6 +599,7 @@ def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
         return _fail(request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
     finally:
         sandbox.cleanup()
+        cleanup_source()
 
 
 def _finalize(

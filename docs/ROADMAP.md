@@ -227,21 +227,37 @@ sandbox access" invariant. Whole-file replacement stays the edit primitive.
 A model that doesn't implement the new `next_tool_call` hook (the default)
 falls straight through to `propose_change` unchanged.
 
-#### 1c. Real repo ingestion
+#### 1c. Real repo ingestion · DONE (behind a flag; not yet run against live GitHub)
 
-- Reuse the room's existing GitHub repo connection (the picker built this
-  session) as the agent's target, replacing the static
-  `DEVROOM_REPOSITORIES_JSON` registry for connected rooms.
-- Clone at a pinned SHA per run into the runtime host, then copy into the
-  sandbox exactly as today. Keep the registry path as a fallback for offline
-  demos.
-- Detect language/test command from repo shape (`pyproject.toml`,
-  `package.json`); let a room override it. Ship **Python-only** first — do not
-  attempt Node in the same phase.
+Reuses the room's connected GitHub repo (`RepositoryConnection`, looked up
+directly from Postgres by the runtime — never trusted from the caller) as the
+agent's target, replacing the static `DEVROOM_REPOSITORIES_JSON` registry for
+connected rooms, behind `DEVROOM_REAL_REPOS_ENABLED` (default off — every repo
+in the static registry and every unconnected room is unaffected).
 
-**Exit criterion:** start a run against a real, non-trivial public Python repo
-with third-party dependencies, and get a plan that references files the agent
-had to go find. That moment is the demo.
+- Clones fresh per run on the runtime host (which has network — the agent
+  sandbox never does), then hands `Sandbox.prepare_repository()` a local
+  directory exactly like the static registry always has. The initial plan
+  clones the default branch and pins whatever commit that resolves to;
+  resuming or re-planning re-clones that **exact** pinned commit, never
+  wherever the branch has since moved — the same "human approved this
+  precise state" guarantee the static registry gets for free.
+- Language/test command detected from the cloned tree
+  (`app/repository/detect.py`): a root Python manifest or any `.py` file →
+  `python` + `pytest -q`; anything else fails clearly rather than silently
+  running pytest against a project it can't test. **Python-only** this phase,
+  as planned — Node detection is explicitly out of scope.
+- A repo owner/repo pair is validated against a strict slug pattern before it
+  ever reaches a `git` argument (defense in depth around a stored connection
+  row, not user input, but cheap and worth having regardless).
+
+**Not yet verified:** a real clone against live github.com (no credential or
+public-internet path was available in this build environment — proven
+end-to-end instead against a local git repo through the identical
+`clone_repository()` code path) and third-party dependency installation for a
+connected repo (that's Phase 1a's setup phase, landing in a separate PR;
+1c's exit criterion — a plan referencing a file the agent had to go find —
+doesn't itself require dependencies to be installed, only planning to work).
 
 ### Phase 2 — Prove delivery end-to-end (2–3 days)
 

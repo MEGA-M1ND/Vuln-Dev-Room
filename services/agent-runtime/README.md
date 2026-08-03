@@ -135,6 +135,34 @@ The web app must set `DEVROOM_AGENT_SERVICE_URL=http://127.0.0.1:8787`,
 `DEVROOM_AGENT_SERVICE_TOKEN=<same token>`, and
 `DEVROOM_DEFAULT_REPOSITORY_KEY=agentguard-demo`.
 
+## Real repositories (Phase 1c)
+
+`DEVROOM_REPOSITORIES_JSON` is a static registry of host-local demo repos —
+fine for a fixture, not for "run this against a real team's codebase". When
+`DEVROOM_REAL_REPOS_ENABLED=true`, a run instead prefers the ticket's room's
+connected GitHub repository (`RepositoryConnection`, looked up directly from
+the same Postgres tables the web app writes — never trusted from the caller)
+and clones it fresh on the runtime host:
+
+- The host has network for exactly this — the agent sandbox never does, and
+  that boundary doesn't move. The clone happens entirely *before* a sandbox
+  exists; `Sandbox.prepare_repository()` receives a local directory, exactly
+  like the static registry always has.
+- The initial plan clones the room's default branch and pins whatever commit
+  that resolves to (`AgentRun.baseRevision`). Resuming after approval —and
+  re-planning after a redirect— re-clones that **exact** commit, never
+  wherever the branch has since moved to, so the sandbox a human approved a
+  plan against is byte-for-byte the one edits are applied to.
+- Language/test command are detected from the cloned tree
+  (`app/repository/detect.py`): a root `pyproject.toml` / `requirements.txt` /
+  `setup.py` / `setup.cfg` / `Pipfile`, or failing that any `.py` file at all,
+  means Python + `pytest -q`. Anything else fails clearly with
+  `UNSUPPORTED_REPOSITORY` — Node/other ecosystems are out of scope this
+  phase. A repo owner/repo pair is validated against a strict slug pattern
+  before it ever reaches a `git` argument.
+- Off by default: every repo in `DEVROOM_REPOSITORIES_JSON`, and every room
+  without a connection, is unaffected until this is deliberately turned on.
+
 ## Tests
 
 ```bash

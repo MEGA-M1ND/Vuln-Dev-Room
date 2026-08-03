@@ -27,7 +27,9 @@ from app.api.schemas import (
 from app.config import RepositoryConfig, Settings, get_settings
 from app.graph.backend_agent import RunRequest, replan_run, resume_run, start_run
 from app.notifier import Notifier
+from app.persistence import repositories as repositories_db
 from app.persistence import runs as runs_db
+from app.repository.clone import RepositorySourceError, github_https_url
 from app.sandbox.docker_sandbox import ensure_docker_available
 from app.sandbox.base import SandboxUnavailableError
 from app.security.service_auth import require_service_token
@@ -59,6 +61,7 @@ def _build_run_request(
     title: str,
     description: str | None,
     allowed_paths: list[str],
+    pinned_revision: str | None = None,
 ) -> RunRequest:
     return RunRequest(
         run_id=run["id"],
@@ -67,7 +70,35 @@ def _build_run_request(
         ticket_description=description or "",
         repo_config=repo,
         allowed_paths=allowed_paths,
+        pinned_revision=pinned_revision,
     )
+
+
+def _resolve_repo(
+    run: dict[str, Any], target_repository_key: str, settings: Settings
+) -> RepositoryConfig | None:
+    """Phase 1c: prefer the room's connected GitHub repository over the
+    static demo registry, when the feature is enabled and a connection
+    exists. Looked up directly from the same Postgres tables the web app
+    writes — the run's roomId (already trusted, from the durable row) is the
+    only input, never anything the caller passes about which repo to use.
+    """
+    if settings.real_repos_enabled:
+        connection = repositories_db.get_active_repository_connection(str(run["roomId"]))
+        if connection is not None:
+            return RepositoryConfig(
+                display_name=f"{connection.owner}/{connection.repo}",
+                git_url=github_https_url(connection.owner, connection.repo),
+                git_ref=connection.default_branch,
+            )
+    return settings.repository(target_repository_key)
+
+
+def _fail_unknown_repository(run_id: str, summary: str) -> None:
+    runs_db.update_run_status(
+        run_id, "FAILED", error_code="UNKNOWN_REPOSITORY", error_summary=summary
+    )
+    runs_db.append_event(run_id, "RUN_FAILED", payload={"errorCode": "UNKNOWN_REPOSITORY"})
 
 
 def _notifier_for(settings: Settings, run: dict[str, Any]) -> Notifier:
@@ -103,19 +134,15 @@ def create_run(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
 
-    repo = settings.repository(body.targetRepositoryKey)
+    try:
+        repo = _resolve_repo(run, body.targetRepositoryKey, settings)
+    except RepositorySourceError as exc:
+        _fail_unknown_repository(body.runId, str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if repo is None:
         # Unknown repository key — reject and mark the run failed durably.
-        runs_db.update_run_status(
-            body.runId,
-            "FAILED",
-            error_code="UNKNOWN_REPOSITORY",
-            error_summary=f"Unknown repository key: {body.targetRepositoryKey!r}",
-        )
-        runs_db.append_event(
-            body.runId,
-            "RUN_FAILED",
-            payload={"errorCode": "UNKNOWN_REPOSITORY"},
+        _fail_unknown_repository(
+            body.runId, f"Unknown repository key: {body.targetRepositoryKey!r}"
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -127,7 +154,11 @@ def create_run(
     allowed = _intersect_allowed(body.allowedPaths, repo.allowed_paths)
 
     run_request = _build_run_request(
-        run, repo, title=body.title, description=body.description, allowed_paths=allowed
+        run,
+        repo,
+        title=body.title,
+        description=body.description,
+        allowed_paths=allowed,
     )
     background.add_task(
         _execute_start, run_request, settings, _notifier_for(settings, run)
@@ -175,7 +206,10 @@ def resume_run_endpoint(
         notifier.notify(status="CANCELLED", event_type="PLAN_REJECTED")
         return ResumeRunResponse(runId=run_id, status="CANCELLED", accepted=True)
 
-    repo = settings.repository(str(run["targetRepositoryKey"]))
+    try:
+        repo = _resolve_repo(run, str(run["targetRepositoryKey"]), settings)
+    except RepositorySourceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if repo is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown repository key.")
 
@@ -185,6 +219,9 @@ def resume_run_endpoint(
         title="",  # title/description already captured in checkpoint state
         description="",
         allowed_paths=_intersect_allowed([], repo.allowed_paths),
+        # Pinned to the exact commit the human approved, never wherever the
+        # branch has since moved to.
+        pinned_revision=run.get("baseRevision"),
     )
     background.add_task(_execute_resume, run_request, settings, notifier)
     return ResumeRunResponse(runId=run_id, status="RUNNING", accepted=True)
@@ -236,7 +273,10 @@ def redirect_run_endpoint(
             detail=f"Run has finished (status={current}).",
         )
 
-    repo = settings.repository(str(run["targetRepositoryKey"]))
+    try:
+        repo = _resolve_repo(run, str(run["targetRepositoryKey"]), settings)
+    except RepositorySourceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if repo is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown repository key.")
 
@@ -246,6 +286,9 @@ def redirect_run_endpoint(
         title="",
         description="",
         allowed_paths=_intersect_allowed([], repo.allowed_paths),
+        # replan_run never touches the sandbox (a guard toolset enforces
+        # that), so this is unused there — kept for consistency with resume.
+        pinned_revision=run.get("baseRevision"),
     )
     background.add_task(
         _execute_replan, run_request, settings, _notifier_for(settings, run)
