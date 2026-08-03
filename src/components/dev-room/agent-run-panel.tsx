@@ -114,7 +114,19 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
   }, [ticketId]);
 
   const refetch = React.useCallback(async () => {
-    if (!runId) return;
+    if (!runId) {
+      // No run known locally yet — a realtime signal may mean a teammate
+      // just started one, so check the ticket for its latest run.
+      try {
+        const res = await apiFetch<{ run: RunDTO | null }>(
+          `/api/tickets/${ticketId}/runs`,
+        );
+        if (res.run) setRun(res.run);
+      } catch {
+        /* transient */
+      }
+      return;
+    }
     try {
       const [r, a, e, i] = await Promise.all([
         apiFetch<{ run: RunDTO }>(`/api/runs/${runId}`),
@@ -131,7 +143,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
     } catch {
       /* transient */
     }
-  }, [runId]);
+  }, [runId, ticketId]);
 
   // Coalesce broadcast-driven refetches: a busy run emits many events and every
   // client in the room receives each one.
