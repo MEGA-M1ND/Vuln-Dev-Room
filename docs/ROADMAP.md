@@ -159,7 +159,36 @@ blocks merge.
 
 The single highest-value phase. Three sub-tracks, in order.
 
-#### 1a. Two-phase sandbox: network for setup, none for the agent
+#### 1a. Two-phase sandbox: network for setup, none for the agent · DONE (PR open)
+
+Implemented on `feat/phase-1a-sandbox-setup`, gated behind
+`DEVROOM_DEPENDENCY_SETUP_ENABLED` (off by default — inert for every currently
+configured repo, since none has a manifest). Shipped:
+
+- `app/sandbox/setup.py`: pure, no-Docker-needed manifest detection returning
+  one of a fixed argv list — never a string built from repo/model content.
+- `docker_sandbox.py`: a short-lived, network-enabled, writable-root container
+  runs the install command, gets `docker commit`-ed to a per-run image; the
+  agent container starts FROM that image with `--network=none` exactly as
+  before. Installed packages live at a fixed `PYTHONUSERBASE` path outside
+  `/tmp` so they aren't shadowed when the agent phase mounts a fresh tmpfs
+  there.
+- New terminal state `SETUP_FAILED` (distinct from `AGENT_ERROR`) and a
+  `DEPENDENCIES_INSTALLED` run event + `LOG` artifact carrying the install
+  output.
+- `cleanup()` removes the per-run snapshot image, not just the container.
+- A second fixture repo (`deps-demo`, pinned to `six==1.16.0`) alongside
+  `agentguard-demo`, and integration tests (Docker-gated, run in CI) proving:
+  the agent-phase container has no network with or without a setup phase
+  having run; the installed dependency is actually importable in the agent
+  phase; a broken manifest raises `SandboxSetupError` rather than silently
+  degrading; the flag genuinely gates the setup phase independent of manifest
+  presence.
+
+Original plan below, for reference:
+
+<details>
+<summary>Original 1a plan</summary>
 
 Preserve the security property that *the agent never touches the network*,
 while allowing deterministic dependency installation.

@@ -52,6 +52,7 @@ const STATUS_LABEL: Record<AgentRunStatus, string> = {
 const EVENT_LABEL: Record<string, string> = {
   RUN_CREATED: "Run created",
   SANDBOX_PREPARED: "Sandbox prepared",
+  DEPENDENCIES_INSTALLED: "Dependencies installed",
   REPOSITORY_INSPECTED: "Repository inspected",
   PLAN_CREATED: "Plan created",
   APPROVAL_REQUESTED: "Waiting for approval",

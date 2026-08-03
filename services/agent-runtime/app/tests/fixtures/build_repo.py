@@ -12,16 +12,22 @@ import shutil
 import subprocess
 import tempfile
 
-TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "agentguard-demo")
+FIXTURES_DIR = os.path.dirname(__file__)
 
 
-def build_demo_repo(dest: str | None = None) -> str:
-    """Create a git repo from the template and return its path."""
+def build_demo_repo(dest: str | None = None, template: str = "agentguard-demo") -> str:
+    """Create a git repo from a fixture template directory and return its path.
+
+    `template` names a sibling directory under app/tests/fixtures/ — e.g. the
+    default "agentguard-demo" (no third-party dependencies) or "deps-demo"
+    (has a requirements.txt, for exercising the sandbox's setup phase).
+    """
     target = dest or tempfile.mkdtemp(prefix="devroom-fixture-")
-    repo = os.path.join(target, "agentguard-demo")
+    template_dir = os.path.join(FIXTURES_DIR, template)
+    repo = os.path.join(target, template)
     # Never carry build artifacts into the fresh repo.
     shutil.copytree(
-        TEMPLATE_DIR,
+        template_dir,
         repo,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
     )
@@ -35,7 +41,7 @@ def build_demo_repo(dest: str | None = None) -> str:
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=env)
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True, env=env)
     subprocess.run(
-        ["git", "commit", "-q", "-m", "Initial AgentGuard demo repo"],
+        ["git", "commit", "-q", "-m", f"Initial {template} repo"],
         cwd=repo,
         check=True,
         env=env,

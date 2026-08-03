@@ -20,6 +20,15 @@ class SandboxError(Exception):
     """Generic sandbox operation failure."""
 
 
+class SandboxSetupError(SandboxError):
+    """The repository's own dependency installation step failed.
+
+    Distinct from SandboxError so callers can surface a SETUP_FAILED terminal
+    state instead of the generic AGENT_ERROR — this is a repo/environment
+    problem, not an agent or infrastructure one.
+    """
+
+
 @dataclass
 class CommandResult:
     exit_code: int
@@ -40,6 +49,12 @@ class PatchResult:
 class PreparedRepository:
     base_revision: str
     tree: list[str] = field(default_factory=list)
+    # True when a setup phase ran (a manifest was detected) and installation
+    # succeeded. False for the common case of a repo with no manifest.
+    dependencies_installed: bool = False
+    # Captured stdout/stderr of the install command, truncated. Empty when
+    # dependencies_installed is False.
+    setup_output: str = ""
 
 
 class Sandbox(Protocol):

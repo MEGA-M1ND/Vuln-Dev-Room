@@ -77,6 +77,19 @@ source is never modified; `.ssh`/`.aws`/`.config`/credentials/home are never
 mounted. There is **no host-execution fallback** — if Docker is unavailable the
 run is marked `FAILED` with `SANDBOX_UNAVAILABLE`.
 
+**Phase 1a — dependency setup (`DEVROOM_DEPENDENCY_SETUP_ENABLED`, off by
+default):** a repo declaring third-party dependencies (`requirements.txt` /
+`pyproject.toml`) gets them installed in a *separate*, short-lived,
+network-enabled, writable-root container first — running exactly one fixed,
+code-selected command (`app/sandbox/setup.py`; the model and repo content
+never influence which command runs, only whether a manifest file is present).
+That container is then `docker commit`-ed to a per-run image, and the agent
+container above is started FROM that image with `--network=none` exactly as
+always. The agent itself never gains network access, regardless of whether a
+setup phase ran. `cleanup()` removes the per-run image alongside the
+container. A repo with no manifest (e.g. the bundled demo fixture) never
+triggers a setup phase at all.
+
 ## The six tools
 
 `list_repository`, `read_file`, `search_repository`, `apply_patch`,
@@ -135,11 +148,17 @@ python -m pytest -q
   redaction, config/registry parsing, `apply_patch` allow-list enforcement.
 - **Integration (Docker-gated, auto-skip without a daemon):** a real sandbox run
   against the fixture repo (failing test → real edit → passing test → real diff),
-  and the full LangGraph pipeline producing PLAN/TEST_RESULT/DIFF/SUMMARY.
+  the full LangGraph pipeline producing PLAN/TEST_RESULT/DIFF/SUMMARY, and (with
+  `DEVROOM_DEPENDENCY_SETUP_ENABLED=true`) the setup phase against a second
+  fixture with a real `requirements.txt` — asserting the dependency installs,
+  survives into the agent phase, and that the agent container still has no
+  network either way.
 
 The fixture repo (`app/tests/fixtures/agentguard-demo/`) ships a genuinely
 failing test and a stub marked `# devroom:implement`; the agent implements it in
 the sandbox, turning the test green. Nothing is faked.
+`app/tests/fixtures/deps-demo/` is its counterpart with a dependency, for
+exercising the setup phase specifically.
 
 ## Model providers
 
