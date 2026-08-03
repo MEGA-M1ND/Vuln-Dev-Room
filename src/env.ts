@@ -48,9 +48,27 @@ const serverSchema = z.object({
     .transform((v) => v === "true"),
   // Local-development credential path. A GitHub App is the production shape
   // (see README); this token path is documented as dev-only.
-  GITHUB_TOKEN: z.string().optional().default(""),
+  //
+  // .trim() + the refine below exist because of a real incident: a token
+  // pasted into a dashboard env var with a trailing newline makes the
+  // underlying fetch() throw a header-validation error before any request is
+  // sent, which the GitHub client can only see as "Could not reach GitHub" —
+  // indistinguishable from a genuine network failure. Reject it here instead,
+  // loudly, at startup.
+  GITHUB_TOKEN: z
+    .string()
+    .trim()
+    .optional()
+    .default("")
+    .refine((v) => !/[\r\n\t]/.test(v), {
+      message:
+        "GITHUB_TOKEN contains a newline/tab character — it was likely pasted " +
+        "with extra whitespace, or wrapped in quotes that got included " +
+        "literally. Re-paste it without surrounding whitespace.",
+    }),
   GITHUB_API_BASE_URL: z
     .string()
+    .trim()
     .url()
     .optional()
     .default("https://api.github.com"),
