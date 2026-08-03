@@ -62,7 +62,7 @@ export function TicketDetails({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col">
       <div className="border-b border-border p-4">
         <div className="flex items-start justify-between gap-2">
           <h2 className="text-base font-semibold">{ticket.title}</h2>
@@ -163,7 +163,7 @@ export function TicketDetails({
         <AgentRunPanel key={ticket.id} ticketId={ticket.id} />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="p-4">
         <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
           Discussion
         </h3>
