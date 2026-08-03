@@ -125,15 +125,32 @@ export function BoardProvider({
       expectedVersion: number,
       position?: number,
     ) => {
-      const { ticket } = await apiFetch<{ ticket: TicketDTO }>(
-        `/api/tickets/${ticketId}/move`,
-        {
-          method: "POST",
-          body: JSON.stringify({ status, expectedVersion, position }),
-        },
-      );
-      upsertTicket(ticket);
-      return ticket;
+      // Optimistic: reflect the move immediately so it doesn't wait on a round
+      // trip. Rolled back below if the request fails (e.g. a version conflict).
+      let previous: TicketDTO | undefined;
+      setBoard((prev) => {
+        previous = prev.tickets.find((t) => t.id === ticketId);
+        return {
+          ...prev,
+          tickets: prev.tickets.map((t) =>
+            t.id === ticketId ? { ...t, status } : t,
+          ),
+        };
+      });
+      try {
+        const { ticket } = await apiFetch<{ ticket: TicketDTO }>(
+          `/api/tickets/${ticketId}/move`,
+          {
+            method: "POST",
+            body: JSON.stringify({ status, expectedVersion, position }),
+          },
+        );
+        upsertTicket(ticket);
+        return ticket;
+      } catch (err) {
+        if (previous) upsertTicket(previous);
+        throw err;
+      }
     },
     [upsertTicket],
   );

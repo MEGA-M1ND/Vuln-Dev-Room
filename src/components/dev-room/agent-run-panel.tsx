@@ -233,8 +233,8 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
         <RunRealtime runId={runId} onSignal={onRealtimeSignal} />
       ) : null}
 
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">backend-agent</span>
           {run ? (
             <Badge className={cn(STATUS_STYLES[run.status])}>
@@ -259,7 +259,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
           ) : null}
         </div>
         {canRun ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <StartWithPlaybook
               roomId={board.room.id}
               onStart={(opts) => void startRun(opts)}
