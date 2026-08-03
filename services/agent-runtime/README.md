@@ -66,6 +66,23 @@ broadcasts a lightweight `RUN_UPDATED` signal to the room over Liveblocks so
 clients refetch live. Best-effort — Postgres remains the source of truth, and
 the web UI polls as a fallback when Liveblocks isn't configured.
 
+## Mid-node steering
+
+Guidance isn't only consumed at the approval gate. `apply_edits`, `run_tests`,
+and `capture_diff` each check for pending guidance at their own checkpoint
+(`_checkpoint(ctx, node=..., steerable=True)`), the same place they already
+check for cancellation. Arriving guidance raises `RunRedirected` — never
+mid-write, only *between* nodes, exactly like `RunCancelled` — which
+`resume_run` catches and hands to `replan_run`: the checkpointed thread
+rewinds to just before `plan_change`, re-plans with the new guidance folded
+in, and stops at the approval gate again. **A re-plan can never skip the
+gate**, so a stale plan can never be applied out from under a human. A `RUN_STEERED`
+event records which node was interrupted.
+
+`plan_change` itself is unaffected — it already consumes guidance directly via
+`take_redirects()`, so the steerable checkpoint only applies downstream of the
+gate, where work is actually in flight.
+
 ## Sandbox security
 
 Every run gets a fresh container started with:

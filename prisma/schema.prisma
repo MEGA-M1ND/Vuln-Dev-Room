@@ -85,6 +85,9 @@ enum RunEventType {
   // Phase 1b: iterative repository comprehension.
   TOOL_CALL
   REPO_EXPLORATION_FINISHED
+  // Phase 3: guidance arrived and cooperatively aborted an actively-running
+  // run (not just one waiting at the approval gate), which then re-planned.
+  RUN_STEERED
 }
 
 /// What kind of human intervention was recorded against a run.

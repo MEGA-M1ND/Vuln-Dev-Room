@@ -258,9 +258,13 @@ def redirect_run_endpoint(
 ) -> ControlResponse:
     """Pick up pending human guidance.
 
-    A run parked at the approval gate is re-planned immediately (the pending
-    approval is already invalidated by the web app). A still-executing run
-    consumes the guidance at its next planning checkpoint, so nothing to do here.
+    A run parked at the approval gate is re-planned immediately here (the
+    pending approval was already invalidated by the web app, so nothing else
+    is using this checkpointed thread right now). A still-executing run picks
+    the guidance up cooperatively at its own next safe checkpoint (Phase 3) —
+    this endpoint must NOT also schedule a replan for it, or two background
+    tasks would race to rewind the same LangGraph thread concurrently: the
+    run's own in-flight `resume_run` invocation, and this one.
     """
     run = runs_db.get_run(run_id)
     if run is None:
@@ -272,6 +276,12 @@ def redirect_run_endpoint(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Run has finished (status={current}).",
         )
+
+    if current != "AWAITING_APPROVAL":
+        # QUEUED/RUNNING: the guidance is already durably PENDING (the web app
+        # persisted it before calling here). The active execution's own
+        # steerable checkpoints will consume it — nothing to schedule.
+        return ControlResponse(runId=run_id, status=current, accepted=True)
 
     try:
         repo = _resolve_repo(run, str(run["targetRepositoryKey"]), settings)

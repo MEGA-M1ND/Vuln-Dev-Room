@@ -106,6 +106,20 @@ class RunCancelled(Exception):
     """
 
 
+class RunRedirected(Exception):
+    """Phase 3: raised at a safe checkpoint when guidance arrives while a node
+    *downstream of the approval gate* is executing — not just while parked at
+    the gate. `node` names where the run was interrupted, for the timeline.
+
+    Like RunCancelled, only ever raised between graph nodes, so a redirect can
+    abort in-flight work (e.g. mid apply_edits/run_tests) but never mid-write.
+    """
+
+    def __init__(self, node: str) -> None:
+        self.node = node
+        super().__init__(node)
+
+
 @dataclass
 class RunContext:
     toolset: Toolset
@@ -117,12 +131,26 @@ class RunContext:
     should_cancel: Callable[[], bool] = lambda: False
     # Phase 1: claims pending human guidance (redirects), marking it applied.
     take_redirects: Callable[[], list[dict[str, Any]]] = lambda: []
+    # Phase 3: mid-run steering probe. True once guidance has arrived while a
+    # node other than plan_change is executing. Only nodes downstream of the
+    # approval gate check this — plan_change already consumes guidance itself
+    # via take_redirects, and there is nothing to steer before it.
+    has_pending_redirect: Callable[[], bool] = lambda: False
 
 
-def _checkpoint(ctx: RunContext) -> None:
-    """Safe cancellation checkpoint, called at the start of every graph node."""
+def _checkpoint(ctx: RunContext, *, node: str = "", steerable: bool = False) -> None:
+    """Safe checkpoint, called at the start of every graph node.
+
+    Cancellation is always observed here. Phase 3: nodes downstream of the
+    approval gate also observe guidance that arrived while they were running
+    (`steerable=True`), so a human can steer an *active* run — not only
+    redirect one waiting at the gate. Both are cooperative: raised only
+    between graph nodes, so a run in flight aborts cleanly, never mid-write.
+    """
     if ctx.should_cancel():
         raise RunCancelled()
+    if steerable and ctx.has_pending_redirect():
+        raise RunRedirected(node)
 
 
 def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
@@ -265,7 +293,7 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
     def apply_edits(state: AgentState) -> dict[str, Any]:
         # This node is the first that can write. It only ever runs after the
         # human approval gate (interrupt_before) has been passed.
-        _checkpoint(ctx)
+        _checkpoint(ctx, node="apply_edits", steerable=True)
         ctx.recorder.event(
             "EDITS_STARTED",
             {"fileCount": len(state.get("proposed_edits", []))},
@@ -281,7 +309,7 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
         return {"applied_paths": applied}
 
     def run_tests(state: AgentState) -> dict[str, Any]:
-        _checkpoint(ctx)
+        _checkpoint(ctx, node="run_tests", steerable=True)
         ctx.recorder.event("TESTS_STARTED", {"command": ctx.toolset.test_command})
         outcome = ctx.toolset.run_project_tests()
         ctx.recorder.artifact(
@@ -306,7 +334,7 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
         }
 
     def capture_diff(state: AgentState) -> dict[str, Any]:
-        _checkpoint(ctx)
+        _checkpoint(ctx, node="capture_diff", steerable=True)
         diff = ctx.toolset.get_git_diff()
         # Alongside the human-readable diff, record the exact reviewed content
         # of each changed file. Delivery (Phase 3) applies THIS, so a pull
@@ -477,6 +505,7 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
             recorder=recorder,
             should_cancel=lambda: runs_db.get_cancel_requested(request.run_id),
             take_redirects=lambda: runs_db.take_pending_redirects(request.run_id),
+            has_pending_redirect=lambda: runs_db.has_pending_redirect(request.run_id),
         )
 
         with checkpointer_context() as checkpointer:
@@ -571,6 +600,7 @@ def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
             recorder=recorder,
             should_cancel=lambda: runs_db.get_cancel_requested(request.run_id),
             take_redirects=lambda: runs_db.take_pending_redirects(request.run_id),
+            has_pending_redirect=lambda: runs_db.has_pending_redirect(request.run_id),
         )
         _ = prepared  # base revision unchanged; kept for clarity
 
@@ -584,6 +614,16 @@ def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
 
     except RunCancelled:
         return _cancelled(request.run_id, recorder, notifier)
+    except RunRedirected as exc:
+        # Phase 3: guidance arrived while this run was actively applying
+        # edits/running tests/capturing the diff — abandon this attempt
+        # (its sandbox is discarded in `finally`, same as a cancellation)
+        # and re-plan with the new guidance. `replan_run` rewinds the SAME
+        # checkpointed thread to just before plan_change and stops again at
+        # the approval gate — the gate is never skipped on a re-plan, so a
+        # steered run can't have a stale plan applied out from under it.
+        recorder.event("RUN_STEERED", {"interruptedAt": exc.node})
+        return replan_run(request, settings, notifier)
     except PathNotAllowedError as exc:
         return _fail(request.run_id, recorder, "PATH_NOT_ALLOWED", str(exc), notifier)
     except SandboxUnavailableError as exc:
@@ -691,6 +731,7 @@ def replan_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
             recorder=recorder,
             should_cancel=lambda: runs_db.get_cancel_requested(request.run_id),
             take_redirects=lambda: runs_db.take_pending_redirects(request.run_id),
+            has_pending_redirect=lambda: runs_db.has_pending_redirect(request.run_id),
         )
 
         with checkpointer_context() as checkpointer:

@@ -128,3 +128,73 @@ def test_redirect_409_when_run_finished(client, monkeypatch):
         "/internal/runs/r1/redirect", headers={"X-Internal-Token": "test-token"}
     )
     assert r.status_code == 409
+
+
+# --- Phase 3: mid-node steering ---------------------------------------------
+
+
+def test_redirect_running_acknowledges_without_scheduling_replan(client, monkeypatch):
+    """A still-executing run must NOT get a concurrently-scheduled replan —
+    that would race against its own in-flight resume_run() rewinding the same
+    checkpointed thread. Its own steerable checkpoints pick the guidance up."""
+    import app.api.routes as routes
+
+    monkeypatch.setattr(
+        runs_db,
+        "get_run",
+        lambda _rid: {
+            "id": "r1",
+            "status": "RUNNING",
+            "roomId": "rm",
+            "targetRepositoryKey": "demo",
+        },
+    )
+    scheduled: list[str] = []
+    monkeypatch.setattr(
+        routes, "_execute_replan", lambda *a, **k: scheduled.append("replan")
+    )
+    r = client.post(
+        "/internal/runs/r1/redirect", headers={"X-Internal-Token": "test-token"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "RUNNING"
+    assert body["accepted"] is True
+    assert scheduled == []  # never scheduled
+
+
+def test_redirect_at_gate_schedules_replan_immediately(client, monkeypatch):
+    """A run parked at the approval gate has nothing else touching its
+    checkpointed thread, so replanning it immediately is safe."""
+    import app.api.routes as routes
+    from app.config import RepositoryConfig
+
+    monkeypatch.setattr(
+        runs_db,
+        "get_run",
+        lambda _rid: {
+            "id": "r1",
+            "status": "AWAITING_APPROVAL",
+            "roomId": "rm",
+            "targetRepositoryKey": "demo",
+            "graphThreadId": "thread-1",
+            "baseRevision": "abc123",
+        },
+    )
+    monkeypatch.setattr(
+        routes,
+        "_resolve_repo",
+        lambda run, key, settings: RepositoryConfig(
+            display_name="demo", source_path="/srv/demo"
+        ),
+    )
+    scheduled: list[str] = []
+    monkeypatch.setattr(
+        routes, "_execute_replan", lambda *a, **k: scheduled.append("replan")
+    )
+    r = client.post(
+        "/internal/runs/r1/redirect", headers={"X-Internal-Token": "test-token"}
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "RUNNING"
+    assert scheduled == ["replan"]

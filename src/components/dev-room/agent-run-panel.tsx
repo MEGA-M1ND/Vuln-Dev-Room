@@ -74,6 +74,7 @@ const EVENT_LABEL: Record<string, string> = {
   PLAYBOOK_SAVED: "Saved as playbook",
   TOOL_CALL: "Exploring repository",
   REPO_EXPLORATION_FINISHED: "Repository exploration finished",
+  RUN_STEERED: "Steered mid-run — re-planning with new guidance",
 };
 
 // TOOL_CALL events carry {tool, args} in payloadJson; show what the agent is
