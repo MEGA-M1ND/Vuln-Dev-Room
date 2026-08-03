@@ -37,7 +37,12 @@ def remote_repo(tmp_path):
         "GIT_COMMITTER_EMAIL": "test@example.com",
     }
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=work, check=True, env=env)
-    (work / "pyproject.toml").write_text('[project]\nname = "demo"\n')
+    # Empty on purpose: enough for detect_language_and_test_command to see a
+    # Python marker, but — unlike a bare pyproject.toml with no [build-system]
+    # — trivially and correctly `pip install`-able, so this exercises Phase
+    # 1a's setup phase (when DEVROOM_DEPENDENCY_SETUP_ENABLED is on, as CI sets
+    # it globally) without tripping an unrelated packaging failure.
+    (work / "requirements.txt").write_text("")
     pkg = work / "pkg"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("")
