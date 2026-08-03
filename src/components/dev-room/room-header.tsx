@@ -8,6 +8,7 @@ import { PresenceAvatarStack } from "@/components/dev-room/presence-avatar-stack
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MemberManager } from "@/components/dev-room/member-manager";
+import { ConnectRepository } from "@/components/dev-room/connect-repository";
 
 export function RoomHeader({
   realtimeEnabled,
@@ -71,6 +72,7 @@ export function RoomHeader({
             Realtime off
           </span>
         )}
+        <ConnectRepository />
         <MemberManager />
         <Link href={`/rooms/${room.id}/playbooks`}>
           <Button variant="outline" size="sm">
