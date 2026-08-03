@@ -86,11 +86,11 @@ function SidePanel({
       <aside
         aria-label={label}
         className={cn(
-          "min-h-0 shrink-0 flex-col overflow-hidden border-border bg-card",
+          "min-h-0 shrink-0 flex-col border-border bg-card",
           inlineClassName,
         )}
       >
-        {children}
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </aside>
 
       {/* Drawer (narrow screens) */}
