@@ -246,6 +246,41 @@ export async function createDraftPullRequest(
   return pull;
 }
 
+export type GitHubRepoSummary = {
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+  private: boolean;
+};
+
+type GitHubApiRepo = {
+  name: string;
+  owner: { login: string };
+  default_branch: string;
+  private: boolean;
+};
+
+/**
+ * Repositories the configured credential can access — i.e. the token
+ * owner's own repos plus any organizations it belongs to. Lets the room UI
+ * offer a picker instead of requiring an operator to type an exact
+ * owner/repo pair.
+ */
+export async function listAccessibleRepositories(
+  credentialRef: string,
+): Promise<GitHubRepoSummary[]> {
+  const repos = await githubFetch<GitHubApiRepo[]>({
+    credentialRef,
+    path: "/user/repos?per_page=100&sort=updated&affiliation=owner,organization_member",
+  });
+  return (repos ?? []).map((r) => ({
+    owner: r.owner.login,
+    repo: r.name,
+    defaultBranch: r.default_branch,
+    private: r.private,
+  }));
+}
+
 export async function getPullRequest(
   credentialRef: string,
   owner: string,
