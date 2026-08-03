@@ -177,44 +177,44 @@ export function TicketDetails({
         </button>
       </div>
 
-      {tab === "details" ? (
-        <>
-          <div className="border-b border-border p-4">
-            <h3 className="text-sm font-semibold text-muted-foreground">
-              Description
-            </h3>
-            {ticket.description ? (
-              <p className="mt-1 whitespace-pre-wrap text-sm">
-                {ticket.description}
-              </p>
-            ) : (
-              <p className="mt-1 text-sm text-muted-foreground">
-                No description provided.
-              </p>
-            )}
-          </div>
-
-          <div className="p-4">
-            <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
-              Coding agent
-            </h3>
-            <AgentRunPanel key={ticket.id} ticketId={ticket.id} />
-          </div>
-        </>
-      ) : (
-        <div className="p-4">
-          {enabled ? (
-            <TicketComments ticketId={ticket.id} />
+      {/* Both tabs stay mounted (hidden, not unmounted) so switching back to
+          Details never re-fetches the agent run from scratch. */}
+      <div className={tab === "details" ? undefined : "hidden"}>
+        <div className="border-b border-border p-4">
+          <h3 className="text-sm font-semibold text-muted-foreground">
+            Description
+          </h3>
+          {ticket.description ? (
+            <p className="mt-1 whitespace-pre-wrap text-sm">
+              {ticket.description}
+            </p>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Realtime comments require Liveblocks configuration. Add
-              <code className="mx-1">LIVEBLOCKS_SECRET_KEY</code> and
-              <code className="mx-1">NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY</code>
-              to <code>.env</code> to enable the discussion thread.
+            <p className="mt-1 text-sm text-muted-foreground">
+              No description provided.
             </p>
           )}
         </div>
-      )}
+
+        <div className="p-4">
+          <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
+            Coding agent
+          </h3>
+          <AgentRunPanel key={ticket.id} ticketId={ticket.id} />
+        </div>
+      </div>
+
+      <div className={cn("p-4", tab === "discussion" ? undefined : "hidden")}>
+        {enabled ? (
+          <TicketComments ticketId={ticket.id} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Realtime comments require Liveblocks configuration. Add
+            <code className="mx-1">LIVEBLOCKS_SECRET_KEY</code> and
+            <code className="mx-1">NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY</code>
+            to <code>.env</code> to enable the discussion thread.
+          </p>
+        )}
+      </div>
 
       <TicketDialog
         mode="edit"
