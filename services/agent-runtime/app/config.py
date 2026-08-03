@@ -55,6 +55,19 @@ class Settings(BaseSettings):
     sandbox_cpus: str = Field(default="1.0", alias="DEVROOM_SANDBOX_CPUS")
     sandbox_pids_limit: int = Field(default=256, alias="DEVROOM_SANDBOX_PIDS_LIMIT")
     sandbox_command_timeout: int = Field(default=120, alias="DEVROOM_SANDBOX_TIMEOUT")
+    # Dependency installation (network-enabled setup phase) gets a longer
+    # budget than an in-sandbox command — package downloads can be slow.
+    sandbox_setup_timeout: int = Field(
+        default=300, alias="DEVROOM_SANDBOX_SETUP_TIMEOUT"
+    )
+    # Phase 1a: a network-enabled setup phase that installs a repo's own
+    # declared dependencies (requirements.txt/pyproject.toml) before the
+    # network-isolated agent phase begins. Off by default so existing
+    # deployments are unaffected until this has been validated in CI/staging;
+    # inert anyway for any repo with no manifest (e.g. the bundled demo).
+    dependency_setup_enabled: bool = Field(
+        default=False, alias="DEVROOM_DEPENDENCY_SETUP_ENABLED"
+    )
 
     # Model selection. When no key is configured the deterministic FakeModel is
     # used, which is what unit/integration tests rely on.
