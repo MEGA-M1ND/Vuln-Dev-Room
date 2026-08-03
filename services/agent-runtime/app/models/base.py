@@ -36,6 +36,20 @@ class PlanResult:
     summary_hint: str = ""
 
 
+@dataclass
+class ToolCall:
+    """A single repository-exploration call the planner wants to make.
+
+    `tool` is one of "list_repository", "read_file", "search_repository" — the
+    same read-only operations already exposed by `app.tools.repository.Toolset`.
+    The graph executes it and feeds the result back via `next_tool_call`; the
+    model itself never touches the sandbox.
+    """
+
+    tool: str
+    args: dict[str, str] = field(default_factory=dict)
+
+
 class Model(Protocol):
     name: str
 
@@ -47,3 +61,21 @@ class Model(Protocol):
         respecting the allow-list.
         """
         ...
+
+    def next_tool_call(
+        self, request: PlanRequest, history: list[tuple[ToolCall, str]]
+    ) -> ToolCall | None:
+        """Optional iterative-comprehension hook.
+
+        Called by the planner, in a loop bounded by
+        `app.graph.prompts.MAX_PLANNING_TOOL_CALLS`, before `propose_change`.
+        `request.file_excerpts` accumulates the results of prior `read_file`
+        calls; `history` is every (call, result) pair made so far this run, in
+        order. Return the next call to make, or `None` once there is enough
+        context to plan.
+
+        The default implementation never explores — a model that doesn't
+        override this goes straight to `propose_change` exactly as before this
+        hook was added.
+        """
+        return None

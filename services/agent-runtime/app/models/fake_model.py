@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 
-from app.models.base import Model, PlanRequest, PlanResult, ProposedEdit
+from app.models.base import Model, PlanRequest, PlanResult, ProposedEdit, ToolCall
 
 _MARKER = re.compile(
     r"^(?P<indent>[ \t]*)raise\s+NotImplementedError\b.*#\s*devroom:implement\s+(?P<expr>.+?)\s*$"
@@ -31,6 +31,29 @@ _MARKER = re.compile(
 
 class FakeModel(Model):
     name = "fake-deterministic"
+
+    def next_tool_call(
+        self, request: PlanRequest, history: list[tuple[ToolCall, str]]
+    ) -> ToolCall | None:
+        # Deterministic stand-in for a real model's judgment: read every
+        # Python file in the tree, one `read_file` call at a time, that hasn't
+        # already been read or supplied up front. Once none remain, it is
+        # "done" and propose_change runs over whatever excerpts were gathered
+        # — exactly the marker-scanning behavior below, just reached via
+        # genuine tool calls instead of a pre-populated dict.
+        read_paths = {
+            call.args.get("path") for call, _ in history if call.tool == "read_file"
+        }
+        candidates = sorted(
+            path
+            for path in request.repo_tree
+            if path.endswith(".py")
+            and path not in read_paths
+            and path not in request.file_excerpts
+        )
+        if not candidates:
+            return None
+        return ToolCall(tool="read_file", args={"path": candidates[0]})
 
     def propose_change(self, request: PlanRequest) -> PlanResult:
         edits: list[ProposedEdit] = []
