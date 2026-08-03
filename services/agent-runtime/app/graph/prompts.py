@@ -13,6 +13,8 @@ BACKEND_AGENT_ROLE = (
     "network, the host filesystem, or any credentials."
 )
 
-# How many files (matching the allow-list) to pull into the model context.
-MAX_INSPECTED_FILES = 12
+# Phase 1b: bounded iterative comprehension. The planner may issue up to this
+# many search/read_file/list_repository tool calls before it must emit a plan
+# — replaces the old one-shot dump of up to 12 files into the first prompt.
+MAX_PLANNING_TOOL_CALLS = 8
 MAX_FILE_BYTES = 20_000

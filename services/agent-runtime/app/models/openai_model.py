@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from app.models.base import Model, PlanRequest, PlanResult, ProposedEdit
+from app.models.base import Model, PlanRequest, PlanResult, ProposedEdit, ToolCall
+from app.models.prompt import EXPLORE_SYSTEM as _EXPLORE_SYSTEM
 from app.models.prompt import SYSTEM as _SYSTEM
+from app.models.prompt import decision_to_tool_call as _decision_to_tool_call
 from app.models.prompt import parse_json_response as _parse_json
+from app.models.prompt import render_exploration_prompt as _render_exploration
 
 
 class OpenAIModel(Model):
@@ -18,6 +21,19 @@ class OpenAIModel(Model):
             ) from exc
         self.name = model_name
         self._client = __import__("openai").OpenAI(api_key=api_key)
+
+    def next_tool_call(
+        self, request: PlanRequest, history: list[tuple[ToolCall, str]]
+    ) -> ToolCall | None:
+        response = self._client.chat.completions.create(
+            model=self.name,
+            messages=[
+                {"role": "system", "content": _EXPLORE_SYSTEM},
+                {"role": "user", "content": _render_exploration(request, history)},
+            ],
+        )
+        text = response.choices[0].message.content or ""
+        return _decision_to_tool_call(text)
 
     def propose_change(self, request: PlanRequest) -> PlanResult:
         import json

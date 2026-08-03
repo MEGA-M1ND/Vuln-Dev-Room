@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 from langgraph.graph import END, START, StateGraph
 
 from app.config import RepositoryConfig, Settings
-from app.graph.prompts import MAX_FILE_BYTES, MAX_INSPECTED_FILES
+from app.graph.prompts import MAX_FILE_BYTES, MAX_PLANNING_TOOL_CALLS
 from app.graph.state import AgentState
-from app.models.base import Model, PlanRequest, ProposedEdit
+from app.models.base import Model, PlanRequest, ProposedEdit, ToolCall
 from app.models.configured_model import build_model
 from app.persistence import artifacts as artifacts_db
 from app.persistence import runs as runs_db
@@ -129,24 +129,63 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
     def inspect_repository(state: AgentState) -> dict[str, Any]:
         _checkpoint(ctx)
         tree = ctx.toolset.list_repository()
-        excerpts: dict[str, str] = {}
-        for path in tree:
-            if len(excerpts) >= MAX_INSPECTED_FILES:
+        ctx.recorder.event("REPOSITORY_INSPECTED", {"fileCount": len(tree)})
+        return {"repo_tree": tree}
+
+    def _execute_tool_call(call: ToolCall) -> str:
+        """Run one exploration tool call against the sandbox toolset.
+
+        Reads are permitted anywhere in the workspace (traversal is still
+        blocked by path normalization) — this mirrors `Toolset.read_file`,
+        which is deliberately not allow-list-gated the way `apply_patch` is.
+        """
+        try:
+            if call.tool == "list_repository":
+                return "\n".join(ctx.toolset.list_repository())
+            if call.tool == "read_file":
+                content = ctx.toolset.read_file(call.args.get("path", ""))
+                return content[:MAX_FILE_BYTES]
+            if call.tool == "search_repository":
+                results = ctx.toolset.search_repository(call.args.get("query", ""))
+                return "\n".join(results)
+            return f"ERROR: unknown tool {call.tool!r}"
+        except SandboxError as exc:
+            return f"ERROR: {exc}"
+
+    def _explore_repository(
+        request: PlanRequest,
+    ) -> tuple[dict[str, str], int]:
+        """Bounded agentic loop: the model may request up to
+        MAX_PLANNING_TOOL_CALLS read-only tool calls before planning.
+
+        Returns the accumulated file excerpts and how many calls were made.
+        Models that don't implement exploration (the default `next_tool_call`
+        returns None immediately) fall straight through with zero calls,
+        exactly as before this loop existed.
+        """
+        excerpts = dict(request.file_excerpts)
+        history: list[tuple[ToolCall, str]] = []
+        for _ in range(MAX_PLANNING_TOOL_CALLS):
+            call = ctx.model.next_tool_call(
+                PlanRequest(
+                    title=request.title,
+                    description=request.description,
+                    language=request.language,
+                    repo_tree=request.repo_tree,
+                    file_excerpts=excerpts,
+                ),
+                history,
+            )
+            if call is None:
                 break
-            if not path.endswith(".py"):
-                continue
-            if not ctx.toolset.is_allowed(path):
-                continue
-            try:
-                content = ctx.toolset.read_file(path)
-            except SandboxError:
-                continue
-            excerpts[path] = content[:MAX_FILE_BYTES]
-        ctx.recorder.event(
-            "REPOSITORY_INSPECTED",
-            {"fileCount": len(tree), "inspected": list(excerpts.keys())},
-        )
-        return {"repo_tree": tree, "excerpts": excerpts}
+            result = _execute_tool_call(call)
+            history.append((call, result))
+            if call.tool == "read_file" and call.args.get("path"):
+                excerpts[call.args["path"]] = result
+            ctx.recorder.event("TOOL_CALL", {"tool": call.tool, "args": call.args})
+        if history:
+            ctx.recorder.event("REPO_EXPLORATION_FINISHED", {"toolCalls": len(history)})
+        return excerpts, len(history)
 
     def plan_change(state: AgentState) -> dict[str, Any]:
         _checkpoint(ctx)
@@ -176,13 +215,31 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
                 + "\n".join(f"- {g}" for g in all_guidance)
             )
 
+        excerpts = dict(state.get("excerpts", {}))
+        # Phase 1b: explore only the first time this run plans. A re-plan
+        # (after a redirect at the approval gate) runs against a sandbox that
+        # refuses every operation by design — planning there must be a pure
+        # model call over the excerpts already gathered, never a fresh
+        # exploration. `exploration_done` is checkpointed state, so it survives
+        # the rewind that `replan_run` performs.
+        if not state.get("exploration_done", False):
+            excerpts, _ = _explore_repository(
+                PlanRequest(
+                    title=state.get("ticket_title", ""),
+                    description=description,
+                    language=ctx.language,
+                    repo_tree=state.get("repo_tree", []),
+                    file_excerpts=excerpts,
+                )
+            )
+
         result = ctx.model.propose_change(
             PlanRequest(
                 title=state.get("ticket_title", ""),
                 description=description,
                 language=ctx.language,
                 repo_tree=state.get("repo_tree", []),
-                file_excerpts=state.get("excerpts", {}),
+                file_excerpts=excerpts,
             )
         )
         edits = [
@@ -201,6 +258,8 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
             "proposed_edits": edits,
             "summary_text": result.summary_hint,
             "guidance": all_guidance,
+            "excerpts": excerpts,
+            "exploration_done": True,
         }
 
     def apply_edits(state: AgentState) -> dict[str, Any]:

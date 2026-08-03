@@ -11,11 +11,14 @@ from __future__ import annotations
 import json
 
 from app.config import Settings
-from app.models.base import Model, PlanRequest, PlanResult, ProposedEdit
+from app.models.base import Model, PlanRequest, PlanResult, ProposedEdit, ToolCall
 from app.models.fake_model import FakeModel
 from app.models.openai_model import OpenAIModel
+from app.models.prompt import EXPLORE_SYSTEM as _EXPLORE_SYSTEM
 from app.models.prompt import SYSTEM as _SYSTEM
+from app.models.prompt import decision_to_tool_call as _decision_to_tool_call
 from app.models.prompt import parse_json_response as _parse_json
+from app.models.prompt import render_exploration_prompt as _render_exploration
 
 
 class ConfiguredModel(Model):
@@ -30,6 +33,22 @@ class ConfiguredModel(Model):
         self._anthropic = __import__("anthropic")
         self.name = model_name
         self._client = self._anthropic.Anthropic(api_key=api_key)
+
+    def next_tool_call(
+        self, request: PlanRequest, history: list[tuple[ToolCall, str]]
+    ) -> ToolCall | None:
+        message = self._client.messages.create(
+            model=self.name,
+            max_tokens=256,
+            system=_EXPLORE_SYSTEM,
+            messages=[
+                {"role": "user", "content": _render_exploration(request, history)}
+            ],
+        )
+        text = "".join(
+            block.text for block in message.content if getattr(block, "type", "") == "text"
+        )
+        return _decision_to_tool_call(text)
 
     def propose_change(self, request: PlanRequest) -> PlanResult:
         excerpts = "\n\n".join(

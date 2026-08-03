@@ -20,6 +20,11 @@ class AgentState(TypedDict, total=False):
     base_revision: str
     repo_tree: list[str]
     excerpts: dict[str, str]
+    # Phase 1b: set once the bounded tool-calling exploration loop has run for
+    # this run's current plan. Kept in checkpointed state so a re-plan (which
+    # runs with a sandbox-refusing guard toolset) reuses the excerpts already
+    # gathered instead of trying to explore again.
+    exploration_done: bool
 
     plan_text: str
     proposed_edits: list[dict[str, Any]]  # {path, new_content, rationale}

@@ -72,7 +72,28 @@ const EVENT_LABEL: Record<string, string> = {
   EDITS_STARTED: "Applying edits",
   PR_DRAFTED: "Draft pull request created",
   PLAYBOOK_SAVED: "Saved as playbook",
+  TOOL_CALL: "Exploring repository",
+  REPO_EXPLORATION_FINISHED: "Repository exploration finished",
 };
+
+// TOOL_CALL events carry {tool, args} in payloadJson; show what the agent is
+// actually looking at instead of the generic label, so a live viewer sees it
+// searching rather than a silent pause.
+function toolCallDetail(e: RunEventDTO): string | null {
+  if (e.type !== "TOOL_CALL") return null;
+  const payload = e.payloadJson as { tool?: string; args?: Record<string, unknown> } | null;
+  const args = payload?.args ?? {};
+  switch (payload?.tool) {
+    case "read_file":
+      return `Reading ${String(args.path ?? "")}`;
+    case "search_repository":
+      return `Searching for "${String(args.query ?? "")}"`;
+    case "list_repository":
+      return "Listing repository tree";
+    default:
+      return null;
+  }
+}
 
 /**
  * Stage 3 ticket-level agent panel: start a run, watch it live (Liveblocks
@@ -398,7 +419,7 @@ function EventTimeline({ events }: { events: RunEventDTO[] }) {
             <span className="text-muted-foreground tabular-nums">
               {new Date(e.createdAt).toLocaleTimeString()}
             </span>
-            <span>{EVENT_LABEL[e.type] ?? e.type}</span>
+            <span>{toolCallDetail(e) ?? EVENT_LABEL[e.type] ?? e.type}</span>
             {e.actorType === "user" ? (
               <span className="text-muted-foreground">(human)</span>
             ) : null}

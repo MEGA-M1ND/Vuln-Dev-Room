@@ -98,6 +98,21 @@ enforces the repository's `allowed_paths` allow-list (with traversal guards).
 `run_project_tests` runs only the repo's **configured** test command — never a
 command chosen by the model or browser.
 
+## Iterative repository comprehension
+
+`plan_change` no longer dumps a fixed, pre-selected set of files into the first
+prompt. Instead the model may issue up to `MAX_PLANNING_TOOL_CALLS` (8)
+read-only `list_repository` / `read_file` / `search_repository` calls — the
+same tools above, executed by the graph so the bound and the sandbox boundary
+are enforced in one place, never by the model. Each call is recorded as a
+`TOOL_CALL` run event, so a room watching a live run sees the agent actually
+searching rather than a silent pause; `REPO_EXPLORATION_FINISHED` marks the
+end of that phase. A model that doesn't implement `next_tool_call` (the
+default) goes straight to `propose_change`, unchanged from before this loop
+existed. Exploration runs at most once per run: a re-plan after a redirect at
+the approval gate reuses the excerpts already gathered instead of exploring
+again, since re-planning is a pure model call with no sandbox access.
+
 ## Local setup
 
 ```bash

@@ -212,21 +212,20 @@ care.** Write the tests first, and state the new invariant explicitly in
 `README`: *the network is available only to a deterministic, lockfile-driven
 install step, never to any process that has seen model output.*
 
-</details>
+#### 1b. Iterative repo comprehension · DONE
 
-#### 1b. Iterative repo comprehension
-
-Replace one-shot 12-file planning with a bounded agentic loop. The tools
-already exist (`search_repository`, `read_file`, `list_tree` in
-`app/tools/repository.py`) — the planner just never calls them.
-
-- `plan_change` becomes: model may issue up to *N* (start with 8) tool calls —
-  `search`, `read_file`, `list_tree` — before it must emit a plan.
-- Keep whole-file replacement as the edit primitive for now (it is what makes
-  the reviewed-content PR guarantee work). Revisit only if file sizes bite.
-- Hard-cap total tokens and tool calls per run; surface the count in the
-  activity timeline so a viewer sees the agent *searching*, which also demos
-  far better than a silent 12-second pause.
+Replaced one-shot 12-file planning with a bounded agentic loop:
+`plan_change` now lets the model issue up to `MAX_PLANNING_TOOL_CALLS` (8)
+`list_repository` / `read_file` / `search_repository` calls — executed and
+bounded by the graph, never the model — before it must emit a plan via the
+unchanged `propose_change`. Each call records a `TOOL_CALL` run event (and a
+closing `REPO_EXPLORATION_FINISHED`), so the activity timeline shows the agent
+searching instead of a silent pause. Exploration runs at most once per run —
+a re-plan after a redirect reuses the excerpts already gathered rather than
+touching the sandbox again, preserving the existing "re-planning has no
+sandbox access" invariant. Whole-file replacement stays the edit primitive.
+A model that doesn't implement the new `next_tool_call` hook (the default)
+falls straight through to `propose_change` unchanged.
 
 #### 1c. Real repo ingestion · DONE (behind a flag; not yet run against live GitHub)
 

@@ -82,6 +82,9 @@ enum RunEventType {
   // MVP Phase 3/4: delivery + reuse.
   PR_DRAFTED
   PLAYBOOK_SAVED
+  // Phase 1b: iterative repository comprehension.
+  TOOL_CALL
+  REPO_EXPLORATION_FINISHED
 }
 
 /// What kind of human intervention was recorded against a run.
