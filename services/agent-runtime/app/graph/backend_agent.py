@@ -11,8 +11,11 @@ injected recorder, so the graph stays deterministic and testable.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
+
+logger = logging.getLogger(__name__)
 
 from langgraph.graph import END, START, StateGraph
 
@@ -404,6 +407,7 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
     except SandboxUnavailableError as exc:
         return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc), notifier)
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Run %s failed unexpectedly", request.run_id)
         return _fail(request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
     finally:
         sandbox.cleanup()
@@ -461,6 +465,7 @@ def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
     except SandboxUnavailableError as exc:
         return _fail(request.run_id, recorder, "SANDBOX_UNAVAILABLE", str(exc), notifier)
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Run %s failed unexpectedly", request.run_id)
         return _fail(request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
     finally:
         sandbox.cleanup()
@@ -572,6 +577,7 @@ def replan_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
     except RunCancelled:
         return _cancelled(request.run_id, recorder, notifier)
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Run %s failed unexpectedly", request.run_id)
         return _fail(
             request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier
         )
