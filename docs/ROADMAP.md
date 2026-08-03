@@ -272,25 +272,36 @@ Small, and unblocks the "one concrete shipped artifact" story.
    `resolveCredential()` change plus an installation-token minting helper, and
    it is **not** demo-blocking.
 
-### Phase 3 — Mid-node steering (4–6 days) · your differentiator
+### Phase 3 — Mid-node steering · DONE
 
-Cheaper than the research implies, because the seams exist. Today
-`take_redirects()` is consumed only inside `plan_change`, and `replan_run`
-handles guidance arriving at the approval gate. Extend rather than rebuild:
+Turned out to be more "extend" than even the original plan expected — the web
+side (`run-controls.tsx`, `requestRedirect`) already enabled "Redirect agent"
+for the full active lifecycle (QUEUED/RUNNING/AWAITING_APPROVAL) and already
+persisted guidance without forcing a status change unless the run was at the
+gate. Only the runtime had the gap:
 
-- `_checkpoint(ctx)` is already called at the top of every node. Make it also
-  poll for pending guidance, not just cancellation.
-- Guidance arriving mid-`run_tests` or mid-`apply_edits` → cooperatively abort
-  the current node (reuse the `RunCancelled` machinery), re-enter `plan_change`
-  with accumulated guidance, and stop at the approval gate again. **Never skip
-  the gate on a re-plan** — that is the invariant that makes steering safe, and
-  it is exactly the story that differentiates you.
-- UI: "Steer now" always enabled while a run is active; show pending guidance
-  as `pending → applied` in the intervention list (that state already exists in
-  the DTO).
+- `_checkpoint(ctx, node=..., steerable=True)` — the existing cancellation
+  checkpoint now also polls for pending guidance on `apply_edits`, `run_tests`,
+  and `capture_diff` (the nodes downstream of the approval gate). `plan_change`
+  and `inspect_repository` are untouched: guidance before the gate is still
+  handled by `plan_change`'s own `take_redirects()`, exactly as before.
+- A new `RunRedirected(node)` exception mirrors `RunCancelled` exactly:
+  raised only *between* nodes, so a steered run can abort in-flight work but
+  never mid-write. `resume_run` catches it, records `RUN_STEERED` with which
+  node was interrupted, and delegates to the existing `replan_run` — reusing
+  its rewind-to-`plan_change`-and-re-gate logic rather than duplicating it.
+  **The gate is never skipped on a re-plan**, exactly as planned.
+- Found and fixed a real pre-existing bug along the way: `redirect_run_endpoint`
+  unconditionally scheduled a `replan_run` background task regardless of
+  status, including for an actively-`RUNNING` run — racing against that run's
+  own in-flight `resume_run` invocation rewinding the *same* checkpointed
+  LangGraph thread concurrently. Now it only replans immediately when the run
+  is genuinely idle at the gate (`AWAITING_APPROVAL`); for an active run the
+  guidance is left durably `PENDING` and the run's own steerable checkpoints
+  pick it up.
 
-This layers a genuinely-requested capability directly on top of your strongest
-existing property. It is the thing to talk about in a pitch.
+This layers a genuinely-requested capability directly on top of the strongest
+existing property (the approval gate). It's the thing to talk about in a pitch.
 
 ### Phase 4 — Fork a run (3–4 days) · cheap "wow"
 
