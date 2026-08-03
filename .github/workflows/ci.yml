@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web (Next.js + Prisma)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: devroom
+          POSTGRES_PASSWORD: devroom
+          POSTGRES_DB: devroom
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devroom"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # A real, reachable database: the integration suites skip themselves
+      # without DATABASE_URL, which is exactly the silence CI exists to remove.
+      DATABASE_URL: postgresql://devroom:devroom@localhost:5432/devroom?schema=public
+      DIRECT_URL: postgresql://devroom:devroom@localhost:5432/devroom?schema=public
+      AUTH_SECRET: ci-secret-not-used-outside-ci
+      NEXTAUTH_URL: http://localhost:3000
+      DEV_AUTH_ENABLED: "true"
+      DEVROOM_AGENT_SERVICE_URL: http://127.0.0.1:8787
+      DEVROOM_AGENT_SERVICE_TOKEN: ci-internal-token
+      DEVROOM_DEFAULT_REPOSITORY_KEY: agentguard-demo
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit + integration tests
+        run: npx vitest run
+
+      # Catches the class of failure that only appears at build time —
+      # notably env vars that parse but are empty (`new URL("")`).
+      - name: Production build
+        run: npx next build
+
+  runtime:
+    name: Agent runtime (FastAPI + sandbox)
+    runs-on: ubuntu-latest
+
+    env:
+      # The Docker-backed suites skip themselves without a reachable daemon and
+      # a real sandbox image. ubuntu-latest ships a daemon; we build the image.
+      DEVROOM_SANDBOX_IMAGE: devroom-sandbox:ci
+      DEVROOM_MODEL_PROVIDER: fake
+      PYTHONUTF8: "1"
+
+    defaults:
+      run:
+        working-directory: services/agent-runtime
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,openai]"
+
+      - name: Build sandbox image
+        run: docker build -f docker/sandbox.Dockerfile -t devroom-sandbox:ci .
+
+      - name: Verify Docker is reachable
+        run: docker info --format '{{.ServerVersion}}'
+
+      # The Docker-dependent suites skip themselves when the daemon or image is
+      # missing, which would let this job pass while testing nothing. Capture
+      # the report once and fail on any skip.
+      - name: Tests
+        run: |
+          set -o pipefail
+          pytest -q -rs | tee pytest-report.txt
+
+      - name: Fail if sandbox tests were skipped
+        run: |
+          if grep -q "Docker not available" pytest-report.txt; then
+            echo "::error::Sandbox tests skipped — Docker or the image is missing."
+            exit 1
+          fi
