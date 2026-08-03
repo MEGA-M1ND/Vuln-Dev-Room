@@ -57,6 +57,9 @@ enum RunArtifactType {
 enum RunEventType {
   RUN_CREATED
   SANDBOX_PREPARED
+  // Phase 1a: a network-enabled setup phase installed the repo's own
+  // declared dependencies before the (network-isolated) agent phase began.
+  DEPENDENCIES_INSTALLED
   REPOSITORY_INSPECTED
   PLAN_CREATED
   // Stage 3: human-in-the-loop approval gate.

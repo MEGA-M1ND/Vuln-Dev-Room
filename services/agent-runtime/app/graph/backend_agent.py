@@ -28,9 +28,7 @@ from app.models.configured_model import build_model
 from app.persistence import artifacts as artifacts_db
 from app.persistence import runs as runs_db
 from app.persistence.checkpoints import checkpointer_context
-from app.repository.clone import RepositorySourceError, clone_repository, list_tracked_files
-from app.repository.detect import UnsupportedRepositoryError, detect_language_and_test_command
-from app.sandbox.base import SandboxError, SandboxUnavailableError
+from app.sandbox.base import SandboxError, SandboxSetupError, SandboxUnavailableError
 from app.sandbox.docker_sandbox import DockerSandbox, ensure_docker_available
 from app.security.paths import PathNotAllowedError
 from app.tools.repository import Toolset
@@ -406,6 +404,7 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
             "SANDBOX_PREPARED",
             {"baseRevision": prepared.base_revision, "fileCount": len(prepared.tree)},
         )
+        _record_setup(recorder, prepared)
 
         toolset = Toolset(
             sandbox=sandbox,
@@ -462,6 +461,8 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
         return _fail(request.run_id, recorder, "CLONE_FAILED", str(exc), notifier)
     except UnsupportedRepositoryError as exc:
         return _fail(request.run_id, recorder, "UNSUPPORTED_REPOSITORY", str(exc), notifier)
+    except SandboxSetupError as exc:
+        return _fail(request.run_id, recorder, "SETUP_FAILED", str(exc), notifier)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Run %s failed unexpectedly", request.run_id)
         return _fail(request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
@@ -497,6 +498,7 @@ def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
         )
         prepared = sandbox.prepare_repository(effective_repo.source_path)
         runs_db.update_run_status(request.run_id, "RUNNING", sandbox_id=sandbox.sandbox_id)
+        _record_setup(recorder, prepared)
 
         toolset = Toolset(
             sandbox=sandbox,
@@ -531,6 +533,8 @@ def resume_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
         return _fail(request.run_id, recorder, "CLONE_FAILED", str(exc), notifier)
     except UnsupportedRepositoryError as exc:
         return _fail(request.run_id, recorder, "UNSUPPORTED_REPOSITORY", str(exc), notifier)
+    except SandboxSetupError as exc:
+        return _fail(request.run_id, recorder, "SETUP_FAILED", str(exc), notifier)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Run %s failed unexpectedly", request.run_id)
         return _fail(request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
@@ -561,6 +565,24 @@ def _finalize(
 def _notify(notifier: Any, *, status: str) -> None:
     if notifier is not None:
         notifier.notify(status=status)
+
+
+def _record_setup(recorder: Recorder, prepared: Any) -> None:
+    """Surface the setup phase in the run's activity timeline. A no-op for the
+    common case (no manifest, no setup phase — dependencies_installed is
+    False for both today's demo fixture and any repo with no third-party
+    dependencies)."""
+    if not prepared.dependencies_installed:
+        return
+    recorder.artifact(
+        "LOG",
+        "Dependency installation",
+        content_text=prepared.setup_output,
+    )
+    recorder.event(
+        "DEPENDENCIES_INSTALLED",
+        {"outputBytes": len(prepared.setup_output)},
+    )
 
 
 def _cancelled(run_id: str, recorder: Recorder, notifier: Any = None) -> str:

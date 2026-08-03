@@ -82,6 +82,9 @@ jobs:
       DEVROOM_SANDBOX_IMAGE: devroom-sandbox:ci
       DEVROOM_MODEL_PROVIDER: fake
       PYTHONUTF8: "1"
+      # Phase 1a is off by default in production; CI turns it on so its own
+      # tests actually exercise the setup phase instead of silently no-op'ing.
+      DEVROOM_DEPENDENCY_SETUP_ENABLED: "true"
 
     defaults:
       run:
