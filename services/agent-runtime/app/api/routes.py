@@ -5,6 +5,7 @@ Endpoints:
   POST /internal/runs                 - start a run (service-authenticated)
   GET  /internal/runs/{runId}         - agent-side state (service-authenticated)
   POST /internal/runs/{runId}/resume  - approve/reject the plan gate
+  POST /internal/runs/{runId}/fork    - copy a source run's plan onto a new run
 
 There is deliberately NO endpoint to run an arbitrary command or prompt.
 """
@@ -18,6 +19,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from app.api.schemas import (
     CreateRunRequest,
     CreateRunResponse,
+    ForkRunRequest,
     HealthResponse,
     ControlResponse,
     ResumeRunRequest,
@@ -25,7 +27,7 @@ from app.api.schemas import (
     RunStateResponse,
 )
 from app.config import RepositoryConfig, Settings, get_settings
-from app.graph.backend_agent import RunRequest, replan_run, resume_run, start_run
+from app.graph.backend_agent import RunRequest, fork_run, replan_run, resume_run, start_run
 from app.notifier import Notifier
 from app.persistence import repositories as repositories_db
 from app.persistence import runs as runs_db
@@ -304,6 +306,34 @@ def redirect_run_endpoint(
         _execute_replan, run_request, settings, _notifier_for(settings, run)
     )
     return ControlResponse(runId=run_id, status="RUNNING", accepted=True)
+
+
+@router.post(
+    "/internal/runs/{run_id}/fork",
+    response_model=ControlResponse,
+    dependencies=[Depends(require_service_token)],
+)
+def fork_run_endpoint(
+    run_id: str,
+    body: ForkRunRequest,
+    settings: Settings = Depends(get_settings),
+) -> ControlResponse:
+    """Fork (roadmap Phase 4): copy a source run's checkpointed plan onto
+    this new run — already created by the web app on its own cloned ticket.
+
+    Synchronous: unlike start/resume/replan this never touches Docker (the
+    source is at the gate, so nothing has been written yet), so there is no
+    need for a background task — the caller gets AWAITING_APPROVAL or a
+    failure directly in the response.
+    """
+    run = runs_db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    notifier = _notifier_for(settings, run)
+    result_status = fork_run(run_id, body.sourceRunId, settings, notifier)
+    return ControlResponse(
+        runId=run_id, status=result_status, accepted=result_status == "AWAITING_APPROVAL"
+    )
 
 
 @router.get(

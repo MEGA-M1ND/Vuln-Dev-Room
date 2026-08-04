@@ -19,6 +19,8 @@ export type ApiErrorCode =
   | "RUN_ALREADY_ACTIVE"
   // The run has finished, so the requested control no longer applies.
   | "RUN_NOT_STEERABLE"
+  // Fork (roadmap Phase 4): only a run waiting at the approval gate can be forked.
+  | "RUN_NOT_FORKABLE"
   // A required optional integration (e.g. GitHub) is not configured.
   | "INTEGRATION_NOT_CONFIGURED"
   | "INTERNAL_ERROR";
@@ -32,6 +34,7 @@ const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   TICKET_VERSION_CONFLICT: 409,
   RUN_ALREADY_ACTIVE: 409,
   RUN_NOT_STEERABLE: 409,
+  RUN_NOT_FORKABLE: 409,
   INTEGRATION_NOT_CONFIGURED: 400,
   INTERNAL_ERROR: 500,
 };

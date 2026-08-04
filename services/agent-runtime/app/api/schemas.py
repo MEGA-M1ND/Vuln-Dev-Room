@@ -61,3 +61,11 @@ class ControlResponse(BaseModel):
     runId: str
     status: str
     accepted: bool
+
+
+class ForkRunRequest(BaseModel):
+    """Fork (roadmap Phase 4): the source run this new run's checkpointed
+    thread should be copied from. The new run row itself is already created
+    (by the web app) before this is called."""
+
+    sourceRunId: str

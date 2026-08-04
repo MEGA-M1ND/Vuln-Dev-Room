@@ -76,7 +76,30 @@ jobs:
     name: Agent runtime (FastAPI + sandbox)
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: devroom
+          POSTGRES_PASSWORD: devroom
+          POSTGRES_DB: devroom
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devroom"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
+      # Phase 4 (fork a run) copies LangGraph checkpoints via a real Postgres
+      # connection — without this, checkpointer_context() falls back to an
+      # in-memory saver and that suite would silently skip, the exact silence
+      # this job exists to remove for the Docker-backed suites below. No
+      # `?schema=` here (unlike the web job): this DSN is read by psycopg
+      # directly, not Prisma, and psycopg rejects `schema` as an unknown URI
+      # query parameter.
+      DATABASE_URL: postgresql://devroom:devroom@localhost:5432/devroom
       # The Docker-backed suites skip themselves without a reachable daemon and
       # a real sandbox image. ubuntu-latest ships a daemon; we build the image.
       DEVROOM_SANDBOX_IMAGE: devroom-sandbox:ci

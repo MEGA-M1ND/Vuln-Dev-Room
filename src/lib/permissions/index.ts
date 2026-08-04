@@ -33,7 +33,9 @@ export type RoomAction =
   | "pr:create"
   | "playbook:create"
   | "playbook:read"
-  | "playbook:archive";
+  | "playbook:archive"
+  // Fork (roadmap Phase 4): branch a run waiting at the approval gate.
+  | "run:fork";
 
 const OWNER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "room:read",
@@ -57,6 +59,7 @@ const OWNER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "playbook:create",
   "playbook:read",
   "playbook:archive",
+  "run:fork",
 ]);
 
 const ENGINEER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
@@ -78,6 +81,7 @@ const ENGINEER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "playbook:create",
   "playbook:read",
   "playbook:archive",
+  "run:fork",
 ]);
 
 // Stage 1 decision: VIEWERs MAY add comments (documented in README). They can

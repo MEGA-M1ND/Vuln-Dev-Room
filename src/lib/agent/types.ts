@@ -47,6 +47,8 @@ export type RunDTO = {
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
+  /** Fork (roadmap Phase 4): the run this one was forked from, if any. */
+  parentRunId: string | null;
 };
 
 export type RunEventDTO = {
