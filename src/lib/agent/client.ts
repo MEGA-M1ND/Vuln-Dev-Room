@@ -158,3 +158,55 @@ export async function cancelAgentRun(runId: string): Promise<void> {
 export async function redirectAgentRun(runId: string): Promise<void> {
   await postInternal(`/internal/runs/${runId}/redirect`, {}, "redirect");
 }
+
+export type ForkRunResult = { status: string; accepted: boolean };
+
+/**
+ * Fork (roadmap Phase 4): ask the runtime to copy `sourceRunId`'s
+ * checkpointed plan onto `runId` (already created by the web app). Unlike
+ * the fire-and-forget control signals above, this is synchronous and the
+ * caller needs the result — the runtime marks the new run FAILED itself on
+ * any rejection, but the web app still needs to know whether to report
+ * success back to whoever clicked "Fork".
+ */
+export async function forkAgentRun(
+  runId: string,
+  sourceRunId: string,
+): Promise<ForkRunResult> {
+  if (!isAgentRuntimeConfigured) {
+    throw new ApiError(
+      "INTERNAL_ERROR",
+      "The agent runtime is not configured on the server.",
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${env.DEVROOM_AGENT_SERVICE_URL}/internal/runs/${runId}/fork`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Token": env.DEVROOM_AGENT_SERVICE_TOKEN,
+      },
+      body: JSON.stringify({ sourceRunId }),
+      cache: "no-store",
+    });
+  } catch (err) {
+    console.error("[agent] runtime unreachable (fork):", err);
+    throw new ApiError(
+      "INTERNAL_ERROR",
+      "Could not reach the agent runtime service.",
+    );
+  }
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    console.error("[agent] runtime rejected fork:", res.status, detail);
+    throw new ApiError(
+      "INTERNAL_ERROR",
+      "The agent runtime rejected the fork request.",
+    );
+  }
+
+  return (await res.json()) as ForkRunResult;
+}

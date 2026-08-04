@@ -27,7 +27,7 @@ from app.models.base import Model, PlanRequest, ProposedEdit, ToolCall
 from app.models.configured_model import build_model
 from app.persistence import artifacts as artifacts_db
 from app.persistence import runs as runs_db
-from app.persistence.checkpoints import checkpointer_context
+from app.persistence.checkpoints import checkpointer_context, copy_thread
 from app.sandbox.base import SandboxError, SandboxSetupError, SandboxUnavailableError
 from app.sandbox.docker_sandbox import DockerSandbox, ensure_docker_available
 from app.security.paths import PathNotAllowedError
@@ -771,6 +771,69 @@ def replan_run(request: RunRequest, settings: Settings, notifier: Any = None) ->
         return _fail(
             request.run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier
         )
+
+
+def fork_run(
+    run_id: str, source_run_id: str, settings: Settings, notifier: Any = None
+) -> str:
+    """Fork (roadmap Phase 4): branch a run parked at the approval gate.
+
+    Copies the source run's checkpointed thread onto this run's own thread
+    (already created by the web app, on its own cloned ticket — see
+    `docs/ROADMAP.md`), so the fork starts `AWAITING_APPROVAL` with exactly
+    the plan the source had at the moment of forking, free to be approved,
+    rejected, or redirected independently from there.
+
+    Only a source parked at the gate is forkable: no sandbox is needed here
+    (nothing has been written yet — the interrupt precedes `apply_edits` — so
+    there is nothing to prepare until someone acts on the fork itself), and
+    unlike start/resume/replan this never touches Docker, so it is fast
+    enough to run synchronously rather than as a background task.
+    """
+    recorder = DbRecorder(run_id, notifier=notifier)
+    source = runs_db.get_run(source_run_id)
+    if source is None or str(source["status"]) != "AWAITING_APPROVAL":
+        return _fail(
+            run_id,
+            recorder,
+            "FORK_SOURCE_NOT_FORKABLE",
+            "Only a run waiting for approval can be forked.",
+            notifier,
+        )
+    run = runs_db.get_run(run_id)
+    if run is None:
+        return _fail(run_id, recorder, "AGENT_ERROR", "The new run row does not exist.", notifier)
+
+    try:
+        copied = copy_thread(str(source["graphThreadId"]), str(run["graphThreadId"]))
+        if copied == 0:
+            return _fail(
+                run_id,
+                recorder,
+                "FORK_SOURCE_NOT_FORKABLE",
+                "The source run has no checkpointed plan to fork.",
+                notifier,
+            )
+
+        with checkpointer_context() as checkpointer:
+            tuple_ = checkpointer.get_tuple(
+                {"configurable": {"thread_id": str(run["graphThreadId"]), "checkpoint_ns": ""}}
+            )
+        values = (tuple_.checkpoint.get("channel_values", {}) if tuple_ else {}) or {}
+        proposed = values.get("proposed_edits", [])
+
+        runs_db.update_run_status(
+            run_id, "AWAITING_APPROVAL", base_revision=source.get("baseRevision")
+        )
+        recorder.event(
+            "APPROVAL_REQUESTED",
+            {"proposedFiles": [e["path"] for e in proposed], "forkedFrom": source_run_id},
+        )
+        _notify(notifier, status="AWAITING_APPROVAL")
+        return "AWAITING_APPROVAL"
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Fork %s failed unexpectedly", run_id)
+        return _fail(run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
 
 
 class _GuardSandbox:

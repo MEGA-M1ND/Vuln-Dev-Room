@@ -107,7 +107,7 @@ and degrade to clear UI states — nothing pretends to work.
 | Read room, watch runs, comment | ✅ | ✅ | ✅ |
 | Read playbooks | ✅ | ✅ | ✅ |
 | Create / edit / move tickets | ✅ | ✅ | ❌ |
-| Start, approve, redirect, cancel, hand off runs | ✅ | ✅ | ❌ |
+| Start, approve, redirect, cancel, hand off, fork runs | ✅ | ✅ | ❌ |
 | Create draft PRs, author playbooks | ✅ | ✅ | ❌ |
 | Delete tickets, update room, manage members | ✅ | ❌ | ❌ |
 
@@ -344,6 +344,11 @@ Postgres and a real Docker sandbox.
 - Playbooks are simple recipes, deliberately not a workflow language.
 - Insights are computed per request with bounded windows; no caching layer yet.
 
-**Roadmap:** multiple agents per room; richer redirect (mid-node steering);
-GitHub App credentials + webhooks for live CI status; playbook variables;
-per-room agent policy.
+**Roadmap:** multiple agents per room; GitHub App credentials + webhooks for
+live CI status; playbook variables; per-room agent policy.
+
+**Shipped since the build above:** mid-node steering (guidance mid-run, not
+just at the gate, re-plans back through the same approval gate — see
+`services/agent-runtime/README.md`); forking a run waiting at the gate onto
+its own cloned ticket, so a proposed plan can be explored two ways at once
+without touching the "one active run per ticket" invariant.

@@ -49,10 +49,11 @@ function toRunDTO(run: RunWithRequester): RunDTO {
     startedAt: run.startedAt?.toISOString() ?? null,
     finishedAt: run.finishedAt?.toISOString() ?? null,
     createdAt: run.createdAt.toISOString(),
+    parentRunId: run.parentRunId,
   };
 }
 
-const runInclude = {
+export const runInclude = {
   requestedBy: { select: { id: true, name: true, image: true } },
   owner: { select: { id: true, name: true, image: true } },
 } satisfies Prisma.AgentRunInclude;
@@ -161,6 +162,16 @@ export async function latestRunForTicket(
     include: runInclude,
   });
   return run ? toRunDTO(run) : null;
+}
+
+/** Fork (roadmap Phase 4): every run forked from this one, oldest first. */
+export async function listForksOfRun(runId: string): Promise<RunDTO[]> {
+  const forks = await prisma.agentRun.findMany({
+    where: { parentRunId: runId },
+    orderBy: { createdAt: "asc" },
+    include: runInclude,
+  });
+  return forks.map(toRunDTO);
 }
 
 export async function listRunEvents(runId: string): Promise<RunEventDTO[]> {

@@ -83,6 +83,24 @@ event records which node was interrupted.
 `take_redirects()`, so the steerable checkpoint only applies downstream of the
 gate, where work is actually in flight.
 
+## Fork a run
+
+`POST /internal/runs/{id}/fork {sourceRunId}` branches a run waiting at the
+approval gate: `checkpoints.copy_thread()` duplicates the source's full
+LangGraph checkpoint history (every row across `checkpoints`,
+`checkpoint_blobs`, `checkpoint_writes`, keyed by `thread_id`) onto the new
+run's thread, reproducing the exact paused state — same proposed plan — on a
+fresh thread that can be approved, rejected, or redirected completely
+independently of its parent. Only allowed from `AWAITING_APPROVAL`: nothing is
+actively mutating the source's checkpointed thread at the gate, so a fork can
+never race a live execution. Synchronous (no Docker involved, since nothing
+has been written yet) — the caller gets `AWAITING_APPROVAL` or a failure
+directly in the response.
+
+The web app creates the new run on its **own cloned ticket** before calling
+this endpoint, rather than sharing the source's — the DB-level "one active run
+per ticket" constraint never has to be relaxed for forking.
+
 ## Sandbox security
 
 Every run gets a fresh container started with:

@@ -303,14 +303,36 @@ gate. Only the runtime had the gap:
 This layers a genuinely-requested capability directly on top of the strongest
 existing property (the approval gate). It's the thing to talk about in a pitch.
 
-### Phase 4 — Fork a run (3–4 days) · cheap "wow"
+### Phase 4 — Fork a run · DONE
 
-LangGraph already checkpoints every node into the `langgraph` Postgres schema.
-A fork is: new run row, copy the checkpoint at a chosen node into a new thread,
-fresh sandbox at the same base SHA, diverge from there. Add `parentRunId` +
-`forkedAtEvent` to `AgentRun` (additive migration) and render a simple parent →
-children list. Skip the Figma canvas entirely; the genealogy *data* is the
-substance, and a list conveys it.
+Built as planned, with two scoping decisions made along the way (an
+`AskUserQuestion` about the concurrency design went unanswered, so the
+safer of the proposed options was taken and flagged rather than blocking):
+
+- **A fork clones onto a brand-new ticket, not the source's.** The DB-level
+  "one active run per ticket" `activeTicketId` unique constraint is a proven,
+  load-bearing safety invariant; rather than relax it for forking, `forkRun()`
+  clones the source ticket (`${title} (fork)`, same description/status/
+  priority) inside the same transaction that creates the child `AgentRun` row.
+  The invariant never needs to change.
+- **Forking is only allowed from a run parked at `AWAITING_APPROVAL`.** At the
+  gate nothing is actively mutating the checkpointed thread, so a fork can
+  never race a live execution. This also meant zero new execution-flow code:
+  the runtime's `fork_run()` reuses the exact same "reach the gate" outcome
+  that `resume_run`/`replan_run` already produce.
+- `PostgresSaver.copy_thread()` (langgraph-checkpoint-postgres) turned out to
+  be declared but unimplemented (`raise NotImplementedError`) for Postgres.
+  Reimplemented manually in `checkpoints.copy_thread()` via raw SQL: all three
+  LangGraph tables (`checkpoints`, `checkpoint_blobs`, `checkpoint_writes`) key
+  every row by `thread_id`, so copying every row with only `thread_id` swapped
+  preserves the complete ancestor chain a forked thread needs.
+- Along the way, found the CI "Agent runtime" job had no Postgres service at
+  all — every existing Python test used `MemorySaver()` directly and never
+  exercised the real Postgres-backed checkpointer. Fixed by adding a
+  `postgres` service to that job, mirroring the `web` job's.
+- `parentRunId` + `forkedAtEvent` on `AgentRun` (additive migration); a
+  "Fork" button on a run waiting at the gate; a simple parent ↔ children list
+  on the run panel — no canvas, the genealogy *data* is the substance.
 
 ### Phase 5 — A second agent (1 week) · after 1–3, not before
 

@@ -17,6 +17,7 @@ import type {
 import { RunControls, RunOwnerBadge } from "@/components/dev-room/run-controls";
 import { RunElapsed } from "@/components/dev-room/run-elapsed";
 import { RunWatchers } from "@/components/dev-room/run-watchers";
+import { RunForkLineage } from "@/components/dev-room/run-forks";
 import { RunDelivery } from "@/components/dev-room/run-delivery";
 import {
   SavePlaybookAction,
@@ -321,6 +322,8 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
           <RunControls run={run} onChanged={refetch} />
         </div>
       ) : null}
+
+      {run ? <RunForkLineage run={run} /> : null}
 
       {/* Guidance the team has given this run */}
       {interventions.length > 0 ? (

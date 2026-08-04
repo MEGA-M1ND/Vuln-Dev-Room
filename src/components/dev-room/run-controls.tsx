@@ -27,10 +27,10 @@ export function RunControls({
   run: RunDTO;
   onChanged: () => void;
 }) {
-  const { role, board } = useBoard();
-  const [dialog, setDialog] = React.useState<null | "cancel" | "redirect" | "handoff">(
-    null,
-  );
+  const { role, board, refetch, selectTicket } = useBoard();
+  const [dialog, setDialog] = React.useState<
+    null | "cancel" | "redirect" | "handoff" | "fork"
+  >(null);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -38,8 +38,11 @@ export function RunControls({
   const canCancel = can(role, "run:cancel") && steerable;
   const canRedirect = can(role, "run:redirect") && steerable;
   const canHandoff = can(role, "run:handoff") && steerable;
+  // Fork (roadmap Phase 4): only from the gate — nothing is executing yet, so
+  // there is nothing for a fresh checkpoint copy to race against.
+  const canFork = can(role, "run:fork") && run.status === "AWAITING_APPROVAL";
 
-  if (!canCancel && !canRedirect && !canHandoff) return null;
+  if (!canCancel && !canRedirect && !canHandoff && !canFork) return null;
 
   async function submit(path: string, body: Record<string, unknown>) {
     setPending(true);
@@ -63,12 +66,39 @@ export function RunControls({
   // Hand-off targets: every other member of this room.
   const handoffTargets = board.members.filter((m) => m.userId !== run.owner?.id);
 
+  async function doFork() {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await apiFetch<{ run: RunDTO }>(`/api/runs/${run.id}/fork`, {
+        method: "POST",
+      });
+      setDialog(null);
+      // The fork lives on its own new ticket — jump the room there so the
+      // person who forked can immediately see it land at the approval gate.
+      await refetch();
+      selectTicket(res.run.ticketId);
+      onChanged();
+    } catch (err) {
+      setError(
+        err instanceof ApiClientError ? err.message : "The request failed.",
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
         {canRedirect ? (
           <Button size="sm" variant="outline" onClick={() => setDialog("redirect")}>
             Redirect agent
+          </Button>
+        ) : null}
+        {canFork ? (
+          <Button size="sm" variant="outline" onClick={() => setDialog("fork")}>
+            Fork
           </Button>
         ) : null}
         {canHandoff && handoffTargets.length > 0 ? (
@@ -179,6 +209,30 @@ export function RunControls({
             </Button>
           </div>
         </form>
+      </Dialog>
+
+      {/* Fork */}
+      <Dialog
+        open={dialog === "fork"}
+        onClose={() => setDialog(null)}
+        title="Fork this run?"
+        description="Creates a new ticket with a copy of this run, paused at the same approval gate with the same proposed plan. Approve, reject, or redirect it independently — the original run is untouched."
+      >
+        <div className="space-y-4">
+          {error ? (
+            <p role="alert" className="text-sm text-red-600">
+              {error}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void doFork()} disabled={pending}>
+              {pending ? "Forking…" : "Fork run"}
+            </Button>
+          </div>
+        </div>
       </Dialog>
 
       {/* Hand-off */}

@@ -217,6 +217,16 @@ model AgentRun {
   cancelRequestedById String?
   // Phase 4: the playbook this run was started from, if any.
   playbookId          String?
+  // Fork (roadmap Phase 4): the run this one was forked from, if any. A fork
+  // is only ever taken from a run parked at the approval gate — the copied
+  // LangGraph checkpoint reproduces that exact paused state on a fresh
+  // thread, so the fork starts AWAITING_APPROVAL with the same proposed plan,
+  // free to be approved, rejected, or redirected independently of its parent.
+  parentRunId         String?
+  // The parent's most recent RunEvent.id at the moment of forking — purely
+  // informational (never a strict FK; the parent's events keep evolving
+  // independently after a fork), so the UI can show "forked after event N".
+  forkedAtEvent       String?
   // Bumped on every status change (a lightweight change token for polling).
   runVersion          Int            @default(1)
   createdAt           DateTime       @default(now())
@@ -225,7 +235,9 @@ model AgentRun {
   // Enforces "at most one active run per ticket" at the DATABASE level: this is
   // set to `ticketId` while QUEUED/RUNNING and null once terminal. Postgres
   // permits many NULLs but only one non-null value per ticket, so two active
-  // runs for the same ticket are impossible even under concurrency.
+  // runs for the same ticket are impossible even under concurrency. A fork
+  // deliberately lives on its OWN cloned ticket (see `forkRun()`) rather than
+  // sharing the parent's, so this invariant never has to be relaxed for it.
   activeTicketId String? @unique
 
   room          Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
@@ -233,6 +245,8 @@ model AgentRun {
   requestedBy   User              @relation("RunRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
   owner         User?             @relation("RunOwnedBy", fields: [ownerUserId], references: [id], onDelete: SetNull)
   playbook      Playbook?         @relation("PlaybookRuns", fields: [playbookId], references: [id], onDelete: SetNull)
+  parent        AgentRun?         @relation("RunForks", fields: [parentRunId], references: [id], onDelete: SetNull)
+  forks         AgentRun[]        @relation("RunForks")
   artifacts     RunArtifact[]
   events        RunEvent[]
   interventions RunIntervention[]
@@ -246,6 +260,7 @@ model AgentRun {
   @@index([roomId, status, createdAt])
   @@index([ticketId, status])
   @@index([ownerUserId])
+  @@index([parentRunId])
 }
 
 /// An auditable human intervention against a run (redirect, hand-off, cancel).
