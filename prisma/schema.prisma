@@ -52,6 +52,8 @@ enum RunArtifactType {
   TEST_RESULT
   SUMMARY
   LOG
+  // Phase 5: reviewer-agent's structured review of another run's diff.
+  REVIEW
 }
 
 enum RunEventType {
@@ -88,6 +90,9 @@ enum RunEventType {
   // Phase 3: guidance arrived and cooperatively aborted an actively-running
   // run (not just one waiting at the approval gate), which then re-planned.
   RUN_STEERED
+  // Phase 5: reviewer-agent posted a structured review of another run.
+  REVIEW_REQUESTED
+  REVIEW_POSTED
 }
 
 /// What kind of human intervention was recorded against a run.
@@ -227,6 +232,12 @@ model AgentRun {
   // informational (never a strict FK; the parent's events keep evolving
   // independently after a fork), so the UI can show "forked after event N".
   forkedAtEvent       String?
+  // Reviewer-agent (roadmap Phase 5): the run this one reviews, if any. Unlike
+  // a fork, a review run shares the source's OWN ticket rather than cloning
+  // one — it never touches the repository or sandbox, so there is nothing to
+  // diverge, and by the time a review can start (source status SUCCEEDED) the
+  // ticket's active-run slot is already free.
+  reviewedRunId       String?
   // Bumped on every status change (a lightweight change token for polling).
   runVersion          Int            @default(1)
   createdAt           DateTime       @default(now())
@@ -247,6 +258,8 @@ model AgentRun {
   playbook      Playbook?         @relation("PlaybookRuns", fields: [playbookId], references: [id], onDelete: SetNull)
   parent        AgentRun?         @relation("RunForks", fields: [parentRunId], references: [id], onDelete: SetNull)
   forks         AgentRun[]        @relation("RunForks")
+  reviewedRun   AgentRun?         @relation("RunReviews", fields: [reviewedRunId], references: [id], onDelete: SetNull)
+  reviews       AgentRun[]        @relation("RunReviews")
   artifacts     RunArtifact[]
   events        RunEvent[]
   interventions RunIntervention[]
@@ -261,6 +274,7 @@ model AgentRun {
   @@index([ticketId, status])
   @@index([ownerUserId])
   @@index([parentRunId])
+  @@index([reviewedRunId])
 }
 
 /// An auditable human intervention against a run (redirect, hand-off, cancel).

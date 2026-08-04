@@ -37,6 +37,40 @@ class PlanResult:
 
 
 @dataclass
+class ReviewRequest:
+    """What reviewer-agent sees of the run it is reviewing (roadmap Phase 5).
+
+    No ticket title/description: AgentRun rows don't persist them (only the
+    Ticket does, and the ticket context is already embedded in `plan_text` —
+    every Model.propose_change() implementation opens its plan with the
+    ticket it addressed), so reviewer-agent works from what the source run
+    itself durably captured rather than a second round trip to fetch it.
+    """
+
+    plan_text: str
+    diff_text: str
+    test_output: str
+    test_passed: bool | None
+
+
+@dataclass
+class ReviewComment:
+    """One review remark. `path` is empty for a run-level (not file-level)
+    remark, e.g. a failing test suite."""
+
+    path: str
+    severity: str  # "info" | "suggestion" | "concern"
+    comment: str
+
+
+@dataclass
+class ReviewResult:
+    summary: str
+    verdict: str  # "approve" | "request_changes" | "comment"
+    comments: list[ReviewComment] = field(default_factory=list)
+
+
+@dataclass
 class ToolCall:
     """A single repository-exploration call the planner wants to make.
 
@@ -79,3 +113,10 @@ class Model(Protocol):
         hook was added.
         """
         return None
+
+    def review(self, request: ReviewRequest) -> ReviewResult:
+        """Review another run's plan, diff and test result (roadmap Phase 5:
+        reviewer-agent). Read-only — no side effects, no repository access;
+        everything it needs is already captured on the run being reviewed.
+        """
+        ...

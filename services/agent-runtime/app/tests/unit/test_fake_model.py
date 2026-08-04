@@ -1,5 +1,15 @@
-from app.models.base import PlanRequest
+from app.models.base import PlanRequest, ReviewRequest
 from app.models.fake_model import FakeModel
+
+_DIFF = (
+    "diff --git a/foo.py b/foo.py\n"
+    "index 1111111..2222222 100644\n"
+    "--- a/foo.py\n"
+    "+++ b/foo.py\n"
+    "@@ -1 +1 @@\n"
+    "-old\n"
+    "+new\n"
+)
 
 
 def test_fake_model_implements_marked_stub():
@@ -50,3 +60,49 @@ def test_fake_model_no_marker_makes_no_edits():
     )
     assert result.edits == []
     assert "no actionable" in result.plan_text.lower()
+
+
+def test_fake_model_review_approves_a_passing_diff():
+    result = FakeModel().review(
+        ReviewRequest(
+            plan_text="Address ticket: t\n",
+            diff_text=_DIFF,
+            test_output="1 passed",
+            test_passed=True,
+        )
+    )
+    assert result.verdict == "approve"
+    assert [c.path for c in result.comments] == ["foo.py"]
+    assert all(c.severity == "info" for c in result.comments)
+
+
+def test_fake_model_review_requests_changes_on_a_failing_test_run():
+    result = FakeModel().review(
+        ReviewRequest(
+            plan_text="Address ticket: t\n",
+            diff_text=_DIFF,
+            test_output="1 failed",
+            test_passed=False,
+        )
+    )
+    assert result.verdict == "request_changes"
+    concerns = [c for c in result.comments if c.severity == "concern"]
+    assert len(concerns) == 1
+    assert "fail" in concerns[0].comment.lower()
+
+
+def test_fake_model_review_of_empty_diff_is_a_comment_not_an_approval():
+    result = FakeModel().review(
+        ReviewRequest(plan_text="p", diff_text="", test_output="", test_passed=None)
+    )
+    assert result.verdict == "comment"
+    assert result.comments == []
+
+
+def test_fake_model_review_is_deterministic():
+    req = ReviewRequest(
+        plan_text="p", diff_text=_DIFF, test_output="1 passed", test_passed=True
+    )
+    first = FakeModel().review(req)
+    second = FakeModel().review(req)
+    assert first == second

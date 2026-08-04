@@ -6,6 +6,7 @@ Endpoints:
   GET  /internal/runs/{runId}         - agent-side state (service-authenticated)
   POST /internal/runs/{runId}/resume  - approve/reject the plan gate
   POST /internal/runs/{runId}/fork    - copy a source run's plan onto a new run
+  POST /internal/runs/{runId}/review  - review a source run's plan/diff/tests
 
 There is deliberately NO endpoint to run an arbitrary command or prompt.
 """
@@ -24,10 +25,18 @@ from app.api.schemas import (
     ControlResponse,
     ResumeRunRequest,
     ResumeRunResponse,
+    ReviewRunRequest,
     RunStateResponse,
 )
 from app.config import RepositoryConfig, Settings, get_settings
-from app.graph.backend_agent import RunRequest, fork_run, replan_run, resume_run, start_run
+from app.graph.backend_agent import (
+    RunRequest,
+    fork_run,
+    replan_run,
+    resume_run,
+    review_run,
+    start_run,
+)
 from app.notifier import Notifier
 from app.persistence import repositories as repositories_db
 from app.persistence import runs as runs_db
@@ -334,6 +343,37 @@ def fork_run_endpoint(
     return ControlResponse(
         runId=run_id, status=result_status, accepted=result_status == "AWAITING_APPROVAL"
     )
+
+
+def _execute_review(run_id: str, source_run_id: str, settings: Settings, notifier: Notifier) -> None:
+    review_run(run_id, source_run_id, settings, notifier=notifier)
+
+
+@router.post(
+    "/internal/runs/{run_id}/review",
+    response_model=ControlResponse,
+    dependencies=[Depends(require_service_token)],
+)
+def review_run_endpoint(
+    run_id: str,
+    body: ReviewRunRequest,
+    background: BackgroundTasks,
+    settings: Settings = Depends(get_settings),
+) -> ControlResponse:
+    """Reviewer-agent (roadmap Phase 5): review a source run's already-captured
+    plan/diff/test-result — already created by the web app on the source
+    run's own ticket.
+
+    Backgrounded like start/resume/replan: it calls a Model, which may be
+    network-bound for a real provider, so the caller gets QUEUED immediately
+    and the room learns SUCCEEDED/FAILED via the usual notifier/polling path.
+    """
+    run = runs_db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    notifier = _notifier_for(settings, run)
+    background.add_task(_execute_review, run_id, body.sourceRunId, settings, notifier)
+    return ControlResponse(runId=run_id, status="RUNNING", accepted=True)
 
 
 @router.get(

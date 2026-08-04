@@ -334,22 +334,40 @@ safer of the proposed options was taken and flagged rather than blocking):
   "Fork" button on a run waiting at the gate; a simple parent ↔ children list
   on the run panel — no canvas, the genealogy *data* is the substance.
 
-### Phase 5 — A second agent (1 week) · after 1–3, not before
+### Phase 5 — A second agent · DONE
 
-Diverge from the research here. Adding Codex/Claude Code as CLIs means process
-lifecycle, vendor auth, PTY streaming, and per-vendor breakage — high cost, and
-it makes you the fourth product doing the same thing.
+Built as scoped: a second **role** on the infrastructure already there — the
+`agentId` seam (already threaded through `AgentRun`, `CreateRunRequest`) now
+also carries `reviewer-agent`, no CLI, no process lifecycle, no vendor auth.
 
-Instead add a second **role** on the infrastructure you already have. The
-`agentId` seam is already threaded through (`src/lib/agent/runs.ts:79`,
-`app/api/schemas.py:16`), both hardcoded to `backend-agent`:
-
-- **`reviewer-agent`** — reads another run's reviewed diff and posts structured
-  review comments into the ticket discussion. Two agents in one room, visible
-  to everyone, one reviewing the other's work. That is a *better* multiplayer
-  story than "we support four CLIs," and it is honest.
-- Later, if a design partner actually asks for a specific CLI, add it then with
-  evidence rather than speculation.
+- **`reviewer-agent`** reviews a `SUCCEEDED` `backend-agent` run's
+  already-captured plan/diff/test-result and posts a structured `REVIEW`
+  artifact (a verdict — `approve` / `request_changes` / `comment` — plus
+  per-file comments) to the run panel. It never touches the sandbox or
+  repository — everything it needs was already durably captured by the run it
+  reviews, so `review_run()` is a pure read + model call, not a graph.
+- **Where review output lives** — a scoping decision, made without blocking on
+  an unanswered `AskUserQuestion`, same as Phase 4's ticket-clone call: the
+  literal roadmap wording ("posts... into the ticket discussion") would mean
+  Liveblocks thread comments, but ticket comments are Liveblocks-only threads
+  with no server-side persistence, so a synthetic "reviewer-agent" identity
+  would need to be resolved through Liveblocks just to show up. Went with the
+  safer default instead — a `RunArtifact` (type `REVIEW`) on the review run
+  itself, exactly like `PLAN`/`DIFF`/`SUMMARY` already work — which needs no
+  new external dependency and behaves identically whether or not Liveblocks is
+  configured for the room. Flagging here in case literal ticket-thread
+  comments are actually preferred as a fast-follow.
+- **A review run reuses the source's own ticket, not a clone.** Unlike a fork,
+  review never diverges the repository, so there's nothing a cloned ticket
+  would protect — by the time a run is reviewable (`SUCCEEDED`) the ticket's
+  single-active-run slot is already free, and the review simply becomes the
+  ticket's next run.
+- Reviewing a `reviewer-agent` run is rejected (`RUN_NOT_REVIEWABLE`) — no
+  review chains.
+- No new permission: requesting a review reuses `run:create` (OWNER/ENGINEER),
+  since starting a reviewer-agent run is exactly that — starting a run.
+- Later, if a design partner actually asks for a specific CLI (Codex, Claude
+  Code), add it then with evidence rather than speculation.
 
 ### Phase 6 — Trust asset (2 days) · after Phase 0 makes it true
 

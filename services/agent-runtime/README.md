@@ -101,6 +101,35 @@ The web app creates the new run on its **own cloned ticket** before calling
 this endpoint, rather than sharing the source's — the DB-level "one active run
 per ticket" constraint never has to be relaxed for forking.
 
+## A second agent: reviewer-agent
+
+`POST /internal/runs/{id}/review {sourceRunId}` starts `reviewer-agent`
+reviewing another run — a second **role**, not a second CLI, on the exact same
+`agentId` seam every run already carries. Only a `SUCCEEDED` `backend-agent`
+run is reviewable (`RUN_NOT_REVIEWABLE` otherwise, including reviewing a
+`reviewer-agent` run itself — no review chains).
+
+`review_run()` reads the source run's already-captured `PLAN` / `DIFF` /
+`TEST_RESULT` artifacts (`artifacts.get_artifact_by_type()`) and calls
+`Model.review()`, which returns a verdict (`approve` / `request_changes` /
+`comment`) plus structured per-file comments. It never touches the sandbox or
+repository — everything it needs was already durably captured by the run it
+reviews — so this is a plain function, not a LangGraph graph, and it never
+races the checkpointed thread the way a fork or a redirect must reason about.
+The result is written as a `REVIEW` artifact plus a `REVIEW_POSTED` event on
+the review run itself, not as a Liveblocks ticket comment: ticket discussion
+threads have no server-side persistence to write into without a synthetic
+Liveblocks identity, so `REVIEW` reuses the exact same durable-artifact
+mechanism `PLAN`/`DIFF`/`SUMMARY` already use, and renders identically whether
+or not the room has Liveblocks configured.
+
+Backgrounded like start/resume/replan (`Model.review()` may hit a real
+provider's API), unlike fork's synchronous endpoint. The web app creates the
+review run on the **source's own ticket** — not a clone the way a fork gets
+one — since a review never diverges the repository, so there's nothing to
+protect by cloning; by the time a run is reviewable the ticket's
+single-active-run slot is already free for the review to take.
+
 ## Sandbox security
 
 Every run gets a fresh container started with:

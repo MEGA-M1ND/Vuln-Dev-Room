@@ -22,11 +22,24 @@ from __future__ import annotations
 
 import re
 
-from app.models.base import Model, PlanRequest, PlanResult, ProposedEdit, ToolCall
+from app.models.base import (
+    Model,
+    PlanRequest,
+    PlanResult,
+    ProposedEdit,
+    ReviewComment,
+    ReviewRequest,
+    ReviewResult,
+    ToolCall,
+)
 
 _MARKER = re.compile(
     r"^(?P<indent>[ \t]*)raise\s+NotImplementedError\b.*#\s*devroom:implement\s+(?P<expr>.+?)\s*$"
 )
+
+# Standard `git diff` output always lines up a changed file's new path behind
+# a "+++ b/<path>" header; a deletion instead shows "+++ /dev/null".
+_DIFF_FILE_RE = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
 
 
 class FakeModel(Model):
@@ -108,3 +121,46 @@ class FakeModel(Model):
             summary = "No actionable markers were found; no changes were made."
 
         return PlanResult(plan_text=plan, edits=edits, summary_hint=summary)
+
+    def review(self, request: ReviewRequest) -> ReviewResult:
+        # Deterministic stand-in for judgment: read the *actual* diff and test
+        # result rather than fabricating an opinion — one "info" comment per
+        # genuinely changed file, escalated to "request_changes" only when the
+        # captured test run genuinely failed.
+        paths = sorted({p for p in _DIFF_FILE_RE.findall(request.diff_text) if p != "/dev/null"})
+        comments = [
+            ReviewComment(
+                path=path,
+                severity="info",
+                comment=f"Reviewed the change to {path}; it matches the stated plan.",
+            )
+            for path in paths
+        ]
+
+        if request.test_passed is False:
+            comments.append(
+                ReviewComment(
+                    path="",
+                    severity="concern",
+                    comment="The captured test run failed; do not merge until it passes.",
+                )
+            )
+            return ReviewResult(
+                summary=f"Reviewed {len(paths)} changed file(s); blocked on a failing test run.",
+                verdict="request_changes",
+                comments=comments,
+            )
+        if not paths:
+            return ReviewResult(
+                summary="The diff contains no file changes to review.",
+                verdict="comment",
+                comments=comments,
+            )
+        return ReviewResult(
+            summary=(
+                f"Reviewed {len(paths)} changed file(s); tests passing and the "
+                "changes match the stated plan."
+            ),
+            verdict="approve",
+            comments=comments,
+        )

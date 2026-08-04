@@ -11,14 +11,25 @@ from __future__ import annotations
 import json
 
 from app.config import Settings
-from app.models.base import Model, PlanRequest, PlanResult, ProposedEdit, ToolCall
+from app.models.base import (
+    Model,
+    PlanRequest,
+    PlanResult,
+    ProposedEdit,
+    ReviewComment,
+    ReviewRequest,
+    ReviewResult,
+    ToolCall,
+)
 from app.models.fake_model import FakeModel
 from app.models.openai_model import OpenAIModel
 from app.models.prompt import EXPLORE_SYSTEM as _EXPLORE_SYSTEM
+from app.models.prompt import REVIEW_SYSTEM as _REVIEW_SYSTEM
 from app.models.prompt import SYSTEM as _SYSTEM
 from app.models.prompt import decision_to_tool_call as _decision_to_tool_call
 from app.models.prompt import parse_json_response as _parse_json
 from app.models.prompt import render_exploration_prompt as _render_exploration
+from app.models.prompt import render_review_prompt as _render_review
 
 
 class ConfiguredModel(Model):
@@ -84,6 +95,31 @@ class ConfiguredModel(Model):
             plan_text=str(data.get("plan", "")),
             edits=edits,
             summary_hint=str(data.get("summary", "")),
+        )
+
+    def review(self, request: ReviewRequest) -> ReviewResult:
+        message = self._client.messages.create(
+            model=self.name,
+            max_tokens=2048,
+            system=_REVIEW_SYSTEM,
+            messages=[{"role": "user", "content": _render_review(request)}],
+        )
+        text = "".join(
+            block.text for block in message.content if getattr(block, "type", "") == "text"
+        )
+        data = _parse_json(text)
+        comments = [
+            ReviewComment(
+                path=str(c.get("path", "")),
+                severity=str(c.get("severity", "info")),
+                comment=str(c.get("comment", "")),
+            )
+            for c in data.get("comments", [])
+        ]
+        return ReviewResult(
+            summary=str(data.get("summary", "")),
+            verdict=str(data.get("verdict", "comment")),
+            comments=comments,
         )
 
 
