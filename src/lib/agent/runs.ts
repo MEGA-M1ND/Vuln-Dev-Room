@@ -50,6 +50,7 @@ function toRunDTO(run: RunWithRequester): RunDTO {
     finishedAt: run.finishedAt?.toISOString() ?? null,
     createdAt: run.createdAt.toISOString(),
     parentRunId: run.parentRunId,
+    reviewedRunId: run.reviewedRunId,
   };
 }
 
@@ -172,6 +173,16 @@ export async function listForksOfRun(runId: string): Promise<RunDTO[]> {
     include: runInclude,
   });
   return forks.map(toRunDTO);
+}
+
+/** Reviewer-agent (roadmap Phase 5): every review of this run, oldest first. */
+export async function listReviewsOfRun(runId: string): Promise<RunDTO[]> {
+  const reviews = await prisma.agentRun.findMany({
+    where: { reviewedRunId: runId },
+    orderBy: { createdAt: "asc" },
+    include: runInclude,
+  });
+  return reviews.map(toRunDTO);
 }
 
 export async function listRunEvents(runId: string): Promise<RunEventDTO[]> {

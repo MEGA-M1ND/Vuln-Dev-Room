@@ -23,7 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from app.config import RepositoryConfig, Settings
 from app.graph.prompts import MAX_FILE_BYTES, MAX_PLANNING_TOOL_CALLS
 from app.graph.state import AgentState
-from app.models.base import Model, PlanRequest, ProposedEdit, ToolCall
+from app.models.base import Model, PlanRequest, ProposedEdit, ReviewRequest, ToolCall
 from app.models.configured_model import build_model
 from app.persistence import artifacts as artifacts_db
 from app.persistence import runs as runs_db
@@ -833,6 +833,74 @@ def fork_run(
         return "AWAITING_APPROVAL"
     except Exception as exc:  # noqa: BLE001
         logger.exception("Fork %s failed unexpectedly", run_id)
+        return _fail(run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
+
+
+def review_run(
+    run_id: str, source_run_id: str, settings: Settings, notifier: Any = None
+) -> str:
+    """Reviewer-agent (roadmap Phase 5): review another run's already-captured
+    plan, diff and test result.
+
+    Only a SUCCEEDED source is reviewable — that is the only status with a
+    diff worth reviewing, and (see `docs/ROADMAP.md`) a review run reuses the
+    source's own ticket rather than cloning one the way a fork does, which
+    only works once the source is terminal and has released the ticket's
+    active-run slot. Never touches the sandbox or repository: everything
+    reviewer-agent needs was already captured durably by the run it reviews,
+    so this is a pure read + model call, not a graph.
+    """
+    recorder = DbRecorder(run_id, notifier=notifier)
+    source = runs_db.get_run(source_run_id)
+    if source is None or str(source["status"]) != "SUCCEEDED":
+        return _fail(
+            run_id,
+            recorder,
+            "REVIEW_SOURCE_NOT_REVIEWABLE",
+            "Only a successful run can be reviewed.",
+            notifier,
+        )
+    if runs_db.get_run(run_id) is None:
+        return _fail(run_id, recorder, "AGENT_ERROR", "The new run row does not exist.", notifier)
+
+    recorder.event("REVIEW_REQUESTED", {"reviewedRunId": source_run_id})
+    try:
+        plan = artifacts_db.get_artifact_by_type(source_run_id, "PLAN")
+        diff = artifacts_db.get_artifact_by_type(source_run_id, "DIFF")
+        test_result = artifacts_db.get_artifact_by_type(source_run_id, "TEST_RESULT")
+
+        request = ReviewRequest(
+            plan_text=(plan or {}).get("contentText") or "",
+            diff_text=(diff or {}).get("contentText") or "",
+            test_output=(test_result or {}).get("contentText") or "",
+            test_passed=((test_result or {}).get("metadataJson") or {}).get("passed"),
+        )
+        result = build_model(settings).review(request)
+
+        comments_json = [
+            {"path": c.path, "severity": c.severity, "comment": c.comment}
+            for c in result.comments
+        ]
+        recorder.artifact(
+            "REVIEW",
+            f"Review of run {source_run_id}",
+            content_text=result.summary,
+            content_json={"verdict": result.verdict, "comments": comments_json},
+            metadata_json={"verdict": result.verdict, "reviewedRunId": source_run_id},
+        )
+        recorder.event(
+            "REVIEW_POSTED",
+            {
+                "reviewedRunId": source_run_id,
+                "verdict": result.verdict,
+                "commentCount": len(comments_json),
+            },
+        )
+        runs_db.update_run_status(run_id, "SUCCEEDED")
+        _notify(notifier, status="SUCCEEDED")
+        return "SUCCEEDED"
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Review %s failed unexpectedly", run_id)
         return _fail(run_id, recorder, "AGENT_ERROR", f"{type(exc).__name__}: {exc}", notifier)
 
 

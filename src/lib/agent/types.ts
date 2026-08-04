@@ -49,6 +49,8 @@ export type RunDTO = {
   createdAt: string;
   /** Fork (roadmap Phase 4): the run this one was forked from, if any. */
   parentRunId: string | null;
+  /** Reviewer-agent (roadmap Phase 5): the run this one reviews, if any. */
+  reviewedRunId: string | null;
 };
 
 export type RunEventDTO = {

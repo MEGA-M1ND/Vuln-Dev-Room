@@ -69,3 +69,11 @@ class ForkRunRequest(BaseModel):
     (by the web app) before this is called."""
 
     sourceRunId: str
+
+
+class ReviewRunRequest(BaseModel):
+    """Reviewer-agent (roadmap Phase 5): the source run to review. The new
+    run row itself is already created (by the web app, on the source's own
+    ticket) before this is called."""
+
+    sourceRunId: str

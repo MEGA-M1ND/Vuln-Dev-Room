@@ -76,6 +76,8 @@ const EVENT_LABEL: Record<string, string> = {
   TOOL_CALL: "Exploring repository",
   REPO_EXPLORATION_FINISHED: "Repository exploration finished",
   RUN_STEERED: "Steered mid-run — re-planning with new guidance",
+  REVIEW_REQUESTED: "Review requested",
+  REVIEW_POSTED: "Review posted",
 };
 
 // TOOL_CALL events carry {tool, args} in payloadJson; show what the agent is
@@ -114,6 +116,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
   const [interventions, setInterventions] = React.useState<RunInterventionDTO[]>([]);
   const [starting, setStarting] = React.useState(false);
   const [deciding, setDeciding] = React.useState(false);
+  const [requestingReview, setRequestingReview] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const runId = run?.id ?? null;
@@ -213,6 +216,29 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
     }
   }
 
+  async function requestReview() {
+    if (!runId) return;
+    setRequestingReview(true);
+    setError(null);
+    try {
+      const res = await apiFetch<{ run: RunDTO }>(`/api/runs/${runId}/review`, {
+        method: "POST",
+      });
+      // The reviewer-agent run lands on this same ticket and becomes its
+      // newest run, so it replaces what the panel is showing.
+      setRun(res.run);
+      setArtifacts([]);
+      setEvents([]);
+      setInterventions([]);
+    } catch (err) {
+      setError(
+        err instanceof ApiClientError ? err.message : "Could not request a review.",
+      );
+    } finally {
+      setRequestingReview(false);
+    }
+  }
+
   async function decide(decision: "approve" | "reject") {
     if (!runId) return;
     setDeciding(true);
@@ -259,7 +285,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium">backend-agent</span>
+          <span className="text-sm font-medium">{run?.agentId ?? "backend-agent"}</span>
           {run ? (
             <Badge className={cn(STATUS_STYLES[run.status])}>
               <span
@@ -398,9 +424,25 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
         </p>
       ) : null}
 
+      {run && run.agentId === "reviewer-agent" && run.reviewedRunId ? (
+        <p className="text-xs text-muted-foreground">
+          Reviewing an earlier successful run of this ticket.
+        </p>
+      ) : null}
+
       {run && run.status === "SUCCEEDED" ? (
         <div className="flex flex-wrap items-center gap-2">
           <SavePlaybookAction run={run} />
+          {canRun && run.agentId === "backend-agent" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void requestReview()}
+              disabled={requestingReview}
+            >
+              {requestingReview ? "Requesting review…" : "Request review"}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -440,9 +482,16 @@ function ArtifactViews({ artifacts }: { artifacts: RunArtifactDTO[] }) {
   const diff = byType("DIFF")[0];
   const test = byType("TEST_RESULT")[0];
   const summary = byType("SUMMARY")[0];
+  const review = byType("REVIEW")[0];
 
   return (
     <div className="space-y-3">
+      {review ? (
+        <ArtifactSection title="Review" badge={verdictBadge(review.metadataJson)}>
+          <p className="whitespace-pre-wrap text-sm">{review.contentText}</p>
+          <ReviewCommentList contentJson={review.contentJson} />
+        </ArtifactSection>
+      ) : null}
       {summary ? (
         <ArtifactSection title="Summary">
           <p className="whitespace-pre-wrap text-sm">{summary.contentText}</p>
@@ -487,6 +536,50 @@ function testBadge(metadata: unknown): React.ReactNode {
     );
   }
   return null;
+}
+
+const VERDICT_STYLES: Record<string, string> = {
+  approve: "text-green-700 border-green-300",
+  request_changes: "text-red-700 border-red-300",
+  comment: "text-slate-700 border-slate-300",
+};
+
+function verdictBadge(metadata: unknown): React.ReactNode {
+  if (!metadata || typeof metadata !== "object" || !("verdict" in metadata)) return null;
+  const verdict = String((metadata as { verdict?: string }).verdict ?? "comment");
+  return (
+    <Badge className={cn(VERDICT_STYLES[verdict] ?? VERDICT_STYLES.comment)}>
+      {verdict.replace("_", " ")}
+    </Badge>
+  );
+}
+
+type ReviewComment = { path: string; severity: string; comment: string };
+
+/** Reviewer-agent's per-file (or run-level, when path is empty) remarks. */
+function ReviewCommentList({ contentJson }: { contentJson: unknown }) {
+  const comments: ReviewComment[] =
+    contentJson && typeof contentJson === "object" && "comments" in contentJson
+      ? ((contentJson as { comments?: ReviewComment[] }).comments ?? [])
+      : [];
+  if (comments.length === 0) return null;
+  return (
+    <ul className="mt-2 space-y-1.5">
+      {comments.map((c, i) => (
+        <li
+          key={i}
+          className="rounded-md border border-border bg-muted/40 px-2 py-1.5 text-sm"
+        >
+          {c.path ? (
+            <code className="mr-1.5 text-xs text-muted-foreground">{c.path}</code>
+          ) : null}
+          <span className={c.severity === "concern" ? "text-red-700 dark:text-red-300" : ""}>
+            {c.comment}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function ArtifactSection({

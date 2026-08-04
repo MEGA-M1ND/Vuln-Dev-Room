@@ -53,3 +53,29 @@ def append_artifact(
             )
         conn.commit()
     return artifact_id
+
+
+def get_artifact_by_type(run_id: str, artifact_type: str) -> dict[str, Any] | None:
+    """The most recent artifact of a given type for a run, or None.
+
+    Phase 5: reviewer-agent reads a source run's PLAN/DIFF/TEST_RESULT this
+    way rather than touching the sandbox — everything it needs was already
+    captured durably by the run being reviewed.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT "id","type","title","contentText","contentJson","metadataJson","sequence"
+                FROM "RunArtifact"
+                WHERE "runId" = %s AND "type" = %s
+                ORDER BY "sequence" DESC
+                LIMIT 1
+                """,
+                (run_id, artifact_type),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            cols = [d.name for d in cur.description]
+            return dict(zip(cols, row))
