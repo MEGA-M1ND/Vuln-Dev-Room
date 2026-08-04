@@ -369,16 +369,31 @@ also carries `reviewer-agent`, no CLI, no process lifecycle, no vendor auth.
 - Later, if a design partner actually asks for a specific CLI (Codex, Claude
   Code), add it then with evidence rather than speculation.
 
-### Phase 6 — Trust asset (2 days) · after Phase 0 makes it true
+### Phase 6 — Trust asset · DONE
 
-- README top section: *"How we guarantee nothing is written without
-  approval"* — explain `interrupt_before=["apply_edits"]`, that a rejected plan
-  writes nothing at all, that a re-plan re-enters the gate, and that the PR
-  carries the exact reviewed bytes.
-- Publish the **real** CI test count with a badge, once 130/130 run.
-- State self-hosting as a feature: your code never leaves infrastructure you
-  control. That is a genuine differentiator for security-conscious buyers and
-  costs nothing to say, because it is already true.
+Verified each claim against the actual code before writing it down, rather
+than asserting the aspirational version:
+
+- README top section, *"How we guarantee nothing is written without
+  approval"*: `interrupt_before=["apply_edits"]`, a rejected/cancelled run at
+  the gate having written nothing, a redirect invalidating a pending
+  approval, and the PR carrying the exact reviewed bytes. That last one was
+  checked against `src/lib/github/diff.ts` / `pull-requests.ts` before being
+  stated as fact — delivery applies the `DIFF` artifact's recorded file
+  contents, never a re-derivation from the diff text, and refuses to open a
+  PR at all if that artifact is missing.
+- Real CI test count, not the old aspirational "130/130": pulled the actual
+  passing counts from a real CI run (`get_job_logs` on the merged PR #11's
+  jobs) rather than trusting local numbers — this sandbox's own Docker-less
+  environment skips 18 Python tests that CI's real Docker daemon actually
+  runs. CI is **205/205, zero skips** (109 TypeScript + 96 Python). Badge
+  and prose both use that number; the stale "95"/"35" counts in the Tests
+  section were corrected to match.
+- Self-hosting stated as a feature in the same top section: the agent
+  runtime is a service you run, the repository is copied into a Docker
+  container on infrastructure you control, `--network=none` during the
+  isolated agent phase — the code never leaves that container. True already;
+  costs nothing to say.
 
 ---
 

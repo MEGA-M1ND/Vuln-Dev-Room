@@ -1,6 +1,7 @@
 # Dev Room
 
 [![CI](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml/badge.svg)](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-205%2F205-brightgreen)](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml)
 
 **The shared control room for AI coding agents.** Your team watches, steers,
 approves, hands off and ships agent work together — instead of each engineer
@@ -9,6 +10,36 @@ running an agent alone in a private terminal.
 Built for lean teams (3–10 engineers) with a GitHub-native workflow. Not a Jira
 replacement, not an agent swarm dashboard, and never an autonomous
 merge-to-main system.
+
+## How we guarantee nothing is written without approval
+
+This is the property the whole product rests on, so it's stated up front
+rather than buried in an architecture doc:
+
+- The LangGraph state machine is compiled with `interrupt_before=["apply_edits"]`
+  — the graph physically cannot reach the node that writes a file until a
+  human calls the approve endpoint. There is no code path that skips it.
+- **A rejected or cancelled run at the gate has written nothing, provably.**
+  The sandbox used to inspect the repository is read-only up to that point;
+  the interrupt sits *before* the one node that ever calls `apply_patch`, so
+  a reject or cancel there tears the sandbox down having written zero bytes.
+- **A redirect invalidates the pending approval.** If new guidance arrives
+  while a plan is awaiting approval, that plan is discarded and the agent
+  re-plans from scratch — a stale approved plan can never be applied out from
+  under a human, even when the redirect and the approval race each other.
+- **The draft pull request carries the exact bytes a human reviewed** — the
+  run's `DIFF` artifact's recorded file contents, not a re-derivation from the
+  diff text or a fresh model call. If a run never recorded that artifact,
+  delivery refuses to open a PR rather than guess (`src/lib/github/diff.ts`).
+- **Self-hosted by default.** The agent runtime is a service you run — your
+  code is copied into a Docker container on infrastructure you control, and
+  it never leaves that container: `--network=none` during the isolated agent
+  phase, no bind mounts, no telemetry callout. For a team evaluating whether
+  to let an AI agent touch its codebase, "your source never leaves your own
+  infrastructure" is a real answer, not a compliance checkbox.
+
+Every claim above is exercised by an integration test, not just asserted —
+see [§10](#10-tests) for what actually runs in CI.
 
 ---
 
@@ -287,19 +318,24 @@ export DEVROOM_SANDBOX_IMAGE=devroom-sandbox:local
 python -m pytest -q                              # Python
 ```
 
-**TypeScript (95 tests)** — authorization matrix; ticket concurrency;
+**TypeScript (109 tests)** — authorization matrix; ticket concurrency;
 cancel/redirect/hand-off semantics incl. idempotency, approval invalidation and
 active-slot release; DTO leak checks; draft-PR safety (branch naming, traversal
 rejection, one-PR-per-run, config gating); playbook sanitization, scoping and
 reuse accounting; insights aggregation and empty-room behaviour; membership
-invariants (last owner cannot be removed or demoted); realtime coalescing.
+invariants (last owner cannot be removed or demoted); realtime coalescing;
+forking a run at the gate onto its own cloned ticket; reviewer-agent's
+same-ticket reuse and no-review-chains rule.
 
-**Python (35 tests)** — path allow-list and traversal, deterministic model,
+**Python (96 tests)** — path allow-list and traversal, deterministic model,
 redaction, config parsing; Docker-gated integration: real sandbox runs, the
 approval gate writing nothing before approval, cooperative cancellation
 stopping at a node boundary, guidance consumed exactly once, re-plan returning
-to the gate, and reviewed-content recording. Docker-dependent tests skip with an
-explicit message when no daemon is present.
+to the gate, reviewed-content recording, mid-node steering, LangGraph
+checkpoint forking against real Postgres, and reviewer-agent's structured
+verdicts against a real diff. Docker-dependent tests skip with an explicit
+message when no daemon is present — CI runs with one, so all 96 actually
+execute there (`205/205` combined, zero skips).
 
 ### Manual two-browser demo
 
