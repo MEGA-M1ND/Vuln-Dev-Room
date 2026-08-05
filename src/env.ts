@@ -14,8 +14,8 @@ import { z } from "zod";
  * sending anything if that's violated — a token containing even one such
  * character (e.g. "•", U+2022) surfaces downstream as an opaque
  * "Could not reach GitHub" with no indication of the real cause. Finding the
- * exact offending character here lets us fail loudly with a specific,
- * actionable message instead.
+ * exact offending character lets `validateGithubToken()` below log a
+ * specific, actionable diagnostic instead.
  */
 function firstInvalidHeaderChar(value: string): { index: number; code: number } | null {
   for (let i = 0; i < value.length; i++) {
@@ -63,49 +63,8 @@ const serverSchema = z.object({
     .string()
     .optional()
     .transform((v) => v === "true"),
-  // Local-development credential path. A GitHub App is the production shape
-  // (see README); this token path is documented as dev-only.
-  //
-  // .trim() + the refine below exist because of a real incident: a token
-  // pasted into a dashboard env var with a trailing newline makes the
-  // underlying fetch() throw a header-validation error before any request is
-  // sent, which the GitHub client can only see as "Could not reach GitHub" —
-  // indistinguishable from a genuine network failure. Reject it here instead,
-  // loudly, at startup.
-  GITHUB_TOKEN: z
-    .string()
-    .trim()
-    .optional()
-    .default("")
-    .refine((v) => !/[\r\n\t]/.test(v), {
-      message:
-        "GITHUB_TOKEN contains a newline/tab character — it was likely pasted " +
-        "with extra whitespace, or wrapped in quotes that got included " +
-        "literally. Re-paste it without surrounding whitespace.",
-    })
-    // A second, real incident: a token pasted from a masked/obscured display
-    // (e.g. a password manager's "reveal" field, or a UI showing dots while
-    // hidden) can paste literal "•" (U+2022) characters instead of the real
-    // value — invalid in an HTTP header, and invisible in most editors since
-    // it renders identically to the real bullet-masked display it came from.
-    .refine((v) => firstInvalidHeaderChar(v) === null, (v) => {
-      const bad = firstInvalidHeaderChar(v);
-      return {
-        message: bad
-          ? `GITHUB_TOKEN contains a character that is not valid in an HTTP ` +
-            `header (code point ${bad.code} at position ${bad.index}). This is ` +
-            `usually a copy-paste artifact — e.g. copying a masked/obscured ` +
-            `token instead of its real value. Re-copy the token directly from ` +
-            `GitHub's token page and re-paste it.`
-          : "GITHUB_TOKEN contains an invalid character.",
-      };
-    }),
-  GITHUB_API_BASE_URL: z
-    .string()
-    .trim()
-    .url()
-    .optional()
-    .default("https://api.github.com"),
+  // GITHUB_TOKEN and GITHUB_API_BASE_URL are deliberately NOT validated here —
+  // see validateGithubToken()/validateGithubApiBaseUrl() below.
 
   // --- MVP Phase 6: demo affordances (never on in production) ---
   DEVROOM_DEMO_MODE: z
@@ -125,7 +84,68 @@ if (!parsed.success) {
   throw new Error("Invalid server environment. See logs above.");
 }
 
-export const env = parsed.data;
+/**
+ * GITHUB_TOKEN and GITHUB_API_BASE_URL are validated here rather than inside
+ * `serverSchema` above, and deliberately never throw.
+ *
+ * GitHub delivery is an OPTIONAL integration (`isGitHubConfigured`) — an
+ * absent token already degrades gracefully to "not configured," and a
+ * corrupted one must degrade exactly the same way, not take the entire
+ * application down. Putting this validation inside the strict, throwing
+ * schema was itself the bug behind a real incident: a single bad character in
+ * an optional third-party credential failed the whole production build
+ * (`Failed to collect page data for /api/liveblocks-auth`), even though
+ * nothing about that route touches GitHub. The specific diagnostic is still
+ * logged loudly server-side — it's just a warning that disables the feature,
+ * not a fatal error that disables the product.
+ */
+function validateGithubToken(raw: string | undefined): string {
+  const value = (raw ?? "").trim();
+  if (!value) return "";
+  if (/[\r\n\t]/.test(value)) {
+    console.error(
+      "[env] GITHUB_TOKEN contains a newline/tab character — it was likely " +
+        "pasted with extra whitespace, or wrapped in quotes that got included " +
+        "literally. Treating GitHub as unconfigured until it is re-pasted " +
+        "without surrounding whitespace.",
+    );
+    return "";
+  }
+  const bad = firstInvalidHeaderChar(value);
+  if (bad) {
+    console.error(
+      `[env] GITHUB_TOKEN contains a character that is not valid in an HTTP ` +
+        `header (code point ${bad.code} at position ${bad.index}). This is ` +
+        `usually a copy-paste artifact — e.g. copying a masked/obscured token ` +
+        `instead of its real value. Treating GitHub as unconfigured until it ` +
+        `is re-copied directly from GitHub's token page.`,
+    );
+    return "";
+  }
+  return value;
+}
+
+function validateGithubApiBaseUrl(raw: string | undefined): string {
+  const fallback = "https://api.github.com";
+  const value = (raw ?? "").trim();
+  if (!value) return fallback;
+  try {
+    new URL(value);
+    return value;
+  } catch {
+    console.error(
+      `[env] GITHUB_API_BASE_URL (${JSON.stringify(value)}) is not a valid URL — ` +
+        `falling back to ${fallback}.`,
+    );
+    return fallback;
+  }
+}
+
+export const env = {
+  ...parsed.data,
+  GITHUB_TOKEN: validateGithubToken(process.env.GITHUB_TOKEN),
+  GITHUB_API_BASE_URL: validateGithubApiBaseUrl(process.env.GITHUB_API_BASE_URL),
+};
 
 /**
  * The development auth switcher is ONLY available outside production and only
