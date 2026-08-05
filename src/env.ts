@@ -7,6 +7,23 @@ import { z } from "zod";
  *
  * NOTE: This module is server-only. Never import it into a client component.
  */
+
+/**
+ * HTTP header values are serialized as a ByteString: every character must be
+ * a single byte (code point 0–255). `fetch()` throws a TypeError before
+ * sending anything if that's violated — a token containing even one such
+ * character (e.g. "•", U+2022) surfaces downstream as an opaque
+ * "Could not reach GitHub" with no indication of the real cause. Finding the
+ * exact offending character here lets us fail loudly with a specific,
+ * actionable message instead.
+ */
+function firstInvalidHeaderChar(value: string): { index: number; code: number } | null {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code > 255) return { index: i, code };
+  }
+  return null;
+}
 const serverSchema = z.object({
   DATABASE_URL: z.string().url(),
   AUTH_SECRET: z.string().min(1, "AUTH_SECRET is required"),
@@ -65,6 +82,23 @@ const serverSchema = z.object({
         "GITHUB_TOKEN contains a newline/tab character — it was likely pasted " +
         "with extra whitespace, or wrapped in quotes that got included " +
         "literally. Re-paste it without surrounding whitespace.",
+    })
+    // A second, real incident: a token pasted from a masked/obscured display
+    // (e.g. a password manager's "reveal" field, or a UI showing dots while
+    // hidden) can paste literal "•" (U+2022) characters instead of the real
+    // value — invalid in an HTTP header, and invisible in most editors since
+    // it renders identically to the real bullet-masked display it came from.
+    .refine((v) => firstInvalidHeaderChar(v) === null, (v) => {
+      const bad = firstInvalidHeaderChar(v);
+      return {
+        message: bad
+          ? `GITHUB_TOKEN contains a character that is not valid in an HTTP ` +
+            `header (code point ${bad.code} at position ${bad.index}). This is ` +
+            `usually a copy-paste artifact — e.g. copying a masked/obscured ` +
+            `token instead of its real value. Re-copy the token directly from ` +
+            `GitHub's token page and re-paste it.`
+          : "GITHUB_TOKEN contains an invalid character.",
+      };
     }),
   GITHUB_API_BASE_URL: z
     .string()
