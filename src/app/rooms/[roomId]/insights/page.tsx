@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db/client";
 import { getRoomInsights } from "@/lib/insights/service";
 import { RoomErrorState } from "@/components/dev-room/room-error-state";
 import { InsightsView } from "@/components/insights/insights-view";
+import { RiskSignals } from "@/components/dev-room/risk-signals";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,17 @@ export default async function InsightsPage({
         A small set of numbers to tell you whether agent work is landing, and
         where your team is having to step in.
       </p>
+
+      <section className="mt-8">
+        <h2 className="text-lg font-medium">Needs attention</h2>
+        <p className="mb-3 mt-1 max-w-prose text-sm text-muted-foreground">
+          Transparent heuristics over active work — overlapping files, critical
+          paths, scope growth, failing checks and stalled runs. These are
+          prompts for a human to look, not verdicts about whether code is
+          correct.
+        </p>
+        <RiskSignals roomId={roomId} role={membership.role} />
+      </section>
 
       <div className="mt-8">
         <InsightsView roomId={roomId} initial={insights} />
