@@ -26,6 +26,7 @@ import {
 import { useCoalescedCallback } from "@/lib/client/use-coalesced-callback";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { eventLabel } from "@/lib/agent/vocabulary";
 import { cn } from "@/lib/utils";
 
 // Runs in these states are executing and are polled for progress. Deliberately
@@ -63,49 +64,6 @@ const STATUS_LABEL: Record<AgentRunStatus, string> = {
   ABANDONED: "ABANDONED",
 };
 
-// Human-friendly labels for the activity timeline.
-const EVENT_LABEL: Record<string, string> = {
-  RUN_CREATED: "Run created",
-  SANDBOX_PREPARED: "Sandbox prepared",
-  DEPENDENCIES_INSTALLED: "Dependencies installed",
-  REPOSITORY_INSPECTED: "Repository inspected",
-  PLAN_CREATED: "Plan created",
-  APPROVAL_REQUESTED: "Waiting for approval",
-  PLAN_APPROVED: "Plan approved",
-  PLAN_REJECTED: "Plan rejected",
-  FILE_PATCHED: "File patched",
-  TESTS_STARTED: "Tests started",
-  TESTS_FINISHED: "Tests finished",
-  DIFF_CAPTURED: "Diff captured",
-  RUN_SUCCEEDED: "Run succeeded",
-  RUN_FAILED: "Run failed",
-  RUN_CANCELLED: "Run cancelled",
-  CANCELLATION_REQUESTED: "Cancellation requested",
-  REDIRECT_REQUESTED: "Redirect requested",
-  REDIRECT_APPLIED: "Guidance applied — re-planning",
-  OWNERSHIP_TRANSFERRED: "Ownership transferred",
-  EDITS_STARTED: "Applying edits",
-  PR_DRAFTED: "Draft pull request created",
-  PLAYBOOK_SAVED: "Saved as playbook",
-  TOOL_CALL: "Exploring repository",
-  REPO_EXPLORATION_FINISHED: "Repository exploration finished",
-  RUN_STEERED: "Steered mid-run — re-planning with new guidance",
-  REVIEW_REQUESTED: "Review requested",
-  REVIEW_POSTED: "Review posted",
-  // Reported by an external agent adapter via the ingestion contract.
-  AGENT_STARTED: "Agent started",
-  AGENT_PROGRESS: "Agent progress",
-  COMMAND_EXECUTED: "Command executed",
-  ERROR_DETECTED: "Error detected",
-  DECISION_RECORDED: "Decision recorded",
-  HANDOFF_REQUESTED: "Handoff requested",
-  RISK_FLAGGED: "Risk flagged",
-  PR_LINKED: "Pull request linked",
-  PR_UPDATED: "Pull request updated",
-  REVIEW_READY: "Ready for review",
-  RUN_MERGED: "Merged",
-  RUN_ABANDONED: "Abandoned",
-};
 
 // TOOL_CALL events carry {tool, args} in payloadJson; show what the agent is
 // actually looking at instead of the generic label, so a live viewer sees it
@@ -298,10 +256,7 @@ export function AgentRunPanel({ taskId }: { taskId: string }) {
   const plan = artifacts.find((a) => a.type === "PLAN");
   // The newest durable event doubles as the run's current phase.
   const currentPhase =
-    events.length > 0
-      ? (EVENT_LABEL[events[events.length - 1]!.type] ??
-        events[events.length - 1]!.type)
-      : null;
+    events.length > 0 ? eventLabel(events[events.length - 1]!.type) : null;
 
   return (
     <div className="space-y-3">
@@ -492,7 +447,7 @@ function EventTimeline({ events }: { events: RunEventDTO[] }) {
             <span className="text-muted-foreground tabular-nums">
               {new Date(e.createdAt).toLocaleTimeString()}
             </span>
-            <span>{toolCallDetail(e) ?? EVENT_LABEL[e.type] ?? e.type}</span>
+            <span>{toolCallDetail(e) ?? eventLabel(e.type)}</span>
             {e.actorType === "user" ? (
               <span className="text-muted-foreground">(human)</span>
             ) : null}

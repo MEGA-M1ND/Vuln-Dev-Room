@@ -109,9 +109,14 @@ export function InsightsView({
             help="Runs that finished with passing tests and a captured diff."
           />
           <Metric
+            label="Merged"
+            value={String(insights.runs.merged)}
+            help="Runs whose pull request was merged."
+          />
+          <Metric
             label="Success rate"
             value={formatPercent(insights.successRate)}
-            help="Share of finished runs that succeeded."
+            help="Share of finished runs that succeeded or merged."
           />
           <Metric
             label="Draft PRs"
@@ -203,7 +208,12 @@ export function InsightsView({
           <Metric
             label="In progress"
             value={String(insights.runs.inProgress)}
-            help="Runs queued, running, or waiting for plan approval right now."
+            help="Runs still holding their task: running, or waiting on a person."
+          />
+          <Metric
+            label="Abandoned"
+            value={String(insights.runs.abandoned)}
+            help="Work dropped without merging. Nothing broke — it was let go."
           />
         </div>
       </section>

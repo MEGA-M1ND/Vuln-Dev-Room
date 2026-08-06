@@ -473,7 +473,6 @@ model RepositoryConnection {
   @@index([roomId, isActive])
 }
 
-/// The draft pull request opened from a successful run. One per run.
 /// A human dismissal of a computed risk signal.
 ///
 /// Signals themselves are COMPUTED on read, never stored: a stored signal
@@ -497,6 +496,7 @@ model RiskSignalDismissal {
   @@index([runId])
 }
 
+/// The draft pull request opened from a successful run. One per run.
 model PullRequestLink {
   id         String   @id @default(cuid())
   runId      String   @unique

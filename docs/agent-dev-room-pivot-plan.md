@@ -200,6 +200,29 @@ are append-only, so no existing row changes meaning.
 - `RiskSignal` records with `kind`, `severity`, `evidence` JSON, `dismissedById`,
   `dismissedReason` — dismissal is recorded as an event, never a silent delete.
 
+  *As built:* only the **dismissal** is durable (`RiskSignalDismissal`). Signals
+  themselves are computed on read — a stored signal goes stale the moment the
+  underlying facts change and would need a background job to stay honest.
+
+### Control room support (PR4)
+
+No schema change. The control room is a read model assembled from existing
+`AgentTask` / `AgentRun` / `RunEvent` / `PullRequestLink` rows plus the computed
+signals, so there is nothing to keep in sync and nothing to backfill.
+
+Two corrections shipped alongside it, both consequences of the new run states
+added in PR1:
+
+- `getRoomInsights` counted "in progress" from a hard-coded
+  `QUEUED|RUNNING|AWAITING_APPROVAL` list, silently dropping runs in the new
+  `WAITING_FOR_INPUT` / `BLOCKED` / `REVIEW_READY` states from its totals. It
+  now derives from `ACTIVE_RUN_STATUSES`, and counts `MERGED` as a success and
+  `ABANDONED` as a finished non-success.
+- The forty-entry timeline label map lived inside the run panel component. The
+  control room renders the same timeline, so it moved to
+  `src/lib/agent/vocabulary.ts` rather than being copied — two copies would
+  drift the first time an event type was added.
+
 ---
 
 ## 5. Agent-event contract (PR2)
