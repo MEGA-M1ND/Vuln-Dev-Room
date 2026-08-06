@@ -34,7 +34,7 @@ export function LiveblocksRoom({
         id={roomId}
         initialPresence={{
           cursor: null,
-          selectedTicketId: null,
+          selectedTaskId: null,
           selectedRunId: null,
           activity: null,
         }}
@@ -60,26 +60,26 @@ function RealtimeConnecting() {
 
 /**
  * Bridges live Liveblocks data into our Liveblocks-agnostic PresenceContext and:
- *   - publishes this user's selected ticket as presence,
+ *   - publishes this user's selected task as presence,
  *   - refetches the authoritative board on any invalidation broadcast,
  *   - tracks a lightweight cursor position.
  */
 function PresenceBridge({ children }: { children: React.ReactNode }) {
-  const { selectedTicketId, refetch } = useBoard();
+  const { selectedTaskId, refetch } = useBoard();
   const updateMyPresence = useUpdateMyPresence();
   const others = useOthers();
 
-  // Publish selected-ticket presence whenever the local selection changes.
+  // Publish selected-task presence whenever the local selection changes.
   React.useEffect(() => {
-    updateMyPresence({ selectedTicketId });
-  }, [selectedTicketId, updateMyPresence]);
+    updateMyPresence({ selectedTaskId });
+  }, [selectedTaskId, updateMyPresence]);
 
   // On leave/unmount, clear ephemeral presence.
   React.useEffect(() => {
     return () => {
       updateMyPresence({
         cursor: null,
-        selectedTicketId: null,
+        selectedTaskId: null,
         selectedRunId: null,
         activity: null,
       });
@@ -90,9 +90,9 @@ function PresenceBridge({ children }: { children: React.ReactNode }) {
   useEventListener(({ event }) => {
     if (
       event.type === "BOARD_INVALIDATED" ||
-      event.type === "TICKET_CREATED" ||
-      event.type === "TICKET_UPDATED" ||
-      event.type === "TICKET_DELETED"
+      event.type === "TASK_CREATED" ||
+      event.type === "TASK_UPDATED" ||
+      event.type === "TASK_DELETED"
     ) {
       void refetch();
     }
@@ -106,7 +106,7 @@ function PresenceBridge({ children }: { children: React.ReactNode }) {
       avatar: other.info?.avatar,
       color: other.info?.color ?? "#64748b",
       role: other.info?.role ?? "VIEWER",
-      selectedTicketId: other.presence?.selectedTicketId ?? null,
+      selectedTaskId: other.presence?.selectedTaskId ?? null,
       selectedRunId: other.presence?.selectedRunId ?? null,
       activity: other.presence?.activity ?? null,
     }));
@@ -118,8 +118,8 @@ function PresenceBridge({ children }: { children: React.ReactNode }) {
       enabled: true,
       others: presenceUsers,
       onlineUserIds,
-      viewersOf: (ticketId: string) =>
-        presenceUsers.filter((u) => u.selectedTicketId === ticketId),
+      viewersOf: (taskId: string) =>
+        presenceUsers.filter((u) => u.selectedTaskId === taskId),
       watchersOf: (runId: string) =>
         presenceUsers.filter((u) => u.selectedRunId === runId),
       setActivity: (activity: string | null, runId?: string | null) =>

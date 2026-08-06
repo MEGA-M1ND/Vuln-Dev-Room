@@ -24,7 +24,7 @@ export default async function RoomsPage() {
             href="/"
             className="text-sm text-muted-foreground hover:underline"
           >
-            ← Dev Room
+            ← Agent Dev Room
           </Link>
           <h1 className="mt-1 text-2xl font-semibold">Your rooms</h1>
         </div>
@@ -47,7 +47,7 @@ export default async function RoomsPage() {
         <div className="mt-6 rounded-xl border border-dashed border-border p-12 text-center">
           <h2 className="text-lg font-medium">No rooms yet</h2>
           <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
-            Create your first Dev Room to start collaborating on a shared task
+            Create your first room to start collaborating on a shared task
             board with your team.
           </p>
           <Link href="/rooms/new" className="mt-6 inline-block">
@@ -80,7 +80,7 @@ export default async function RoomsPage() {
                 )}
                 <div className="mt-4 flex gap-4 text-xs text-muted-foreground">
                   <span>{room.memberCount} members</span>
-                  <span>{room.ticketCount} tickets</span>
+                  <span>{room.taskCount} tasks</span>
                 </div>
               </Link>
             </li>

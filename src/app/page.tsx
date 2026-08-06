@@ -28,7 +28,7 @@ export default async function HomePage() {
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold">
             D
           </div>
-          <span className="text-lg font-semibold">Dev Room</span>
+          <span className="text-lg font-semibold">Agent Dev Room</span>
         </div>
         {user ? (
           <div className="flex items-center gap-3">
@@ -48,15 +48,15 @@ export default async function HomePage() {
             A shared control room for engineering teams.
           </h1>
           <p className="mt-4 max-w-prose text-muted-foreground">
-            Dev Room is a browser-based control room where engineers share a
-            Kanban board, see who is online, track which ticket each teammate is
+            Agent Dev Room is a browser-based control room where engineers share a
+            Kanban board, see who is online, track which task each teammate is
             viewing, and discuss work through realtime comments. Durable state
             lives in PostgreSQL; presence and comments are powered by Liveblocks.
           </p>
           <ul className="mt-6 grid gap-2 text-sm text-muted-foreground">
             <li>• Shared task board with live updates</li>
-            <li>• Realtime presence and selected-ticket awareness</li>
-            <li>• Ticket comments synchronized across browsers</li>
+            <li>• Realtime presence and selected-task awareness</li>
+            <li>• AgentTask comments synchronized across browsers</li>
           </ul>
           {user ? (
             <div className="mt-8">
@@ -94,7 +94,7 @@ export default async function HomePage() {
           ) : isGitHubOAuthConfigured ? (
             <div className="space-y-4">
               <div>
-                <h2 className="text-lg font-semibold">Sign in to Dev Room</h2>
+                <h2 className="text-lg font-semibold">Sign in to Agent Dev Room</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Sign in with your GitHub account to continue.
                 </p>

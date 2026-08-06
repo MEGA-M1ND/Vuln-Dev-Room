@@ -1,34 +1,34 @@
 "use client";
 
 import * as React from "react";
-import type { TicketPriority, TicketStatus } from "@prisma/client";
+import type { TaskPriority, AgentTaskStatus } from "@prisma/client";
 
-import type { TicketDTO } from "@/lib/types";
+import type { AgentTaskDTO } from "@/lib/types";
 import { useBoard } from "@/components/dev-room/board-context";
 import { ApiClientError } from "@/lib/client/api";
 import {
-  createTicketSchema,
-  updateTicketSchema,
+  createTaskSchema,
+  updateTaskSchema,
 } from "@/lib/validation/schemas";
 import {
   PRIORITY_LABELS,
   PRIORITY_ORDER,
   STATUS_LABELS,
   STATUS_ORDER,
-} from "@/components/dev-room/ticket-meta";
+} from "@/components/dev-room/task-meta";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/field";
 
-export function TicketForm({
+export function AgentTaskForm({
   mode,
-  ticket,
+  task,
   onDone,
 }: {
   mode: "create" | "edit";
-  ticket?: TicketDTO;
+  task?: AgentTaskDTO;
   onDone: () => void;
 }) {
-  const { board, createTicket, updateTicket, refetch } = useBoard();
+  const { board, createTask, updateTask, refetch } = useBoard();
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
 
@@ -38,15 +38,15 @@ export function TicketForm({
     const form = new FormData(e.currentTarget);
     const title = String(form.get("title") ?? "");
     const description = String(form.get("description") ?? "");
-    const priority = String(form.get("priority") ?? "MEDIUM") as TicketPriority;
-    const status = String(form.get("status") ?? "BACKLOG") as TicketStatus;
+    const priority = String(form.get("priority") ?? "MEDIUM") as TaskPriority;
+    const status = String(form.get("status") ?? "BACKLOG") as AgentTaskStatus;
     const assigneeRaw = String(form.get("assigneeId") ?? "");
     const assigneeId = assigneeRaw === "" ? null : assigneeRaw;
 
     setPending(true);
     try {
       if (mode === "create") {
-        const parsed = createTicketSchema.safeParse({
+        const parsed = createTaskSchema.safeParse({
           title,
           description: description || undefined,
           priority,
@@ -58,36 +58,36 @@ export function TicketForm({
           setPending(false);
           return;
         }
-        await createTicket(parsed.data);
-      } else if (ticket) {
-        const parsed = updateTicketSchema.safeParse({
+        await createTask(parsed.data);
+      } else if (task) {
+        const parsed = updateTaskSchema.safeParse({
           title,
           description: description || null,
           priority,
           status,
           assigneeId,
-          expectedVersion: ticket.version,
+          expectedVersion: task.version,
         });
         if (!parsed.success) {
           setError(parsed.error.issues[0]?.message ?? "Invalid input");
           setPending(false);
           return;
         }
-        await updateTicket(ticket.id, parsed.data);
+        await updateTask(task.id, parsed.data);
       }
       onDone();
     } catch (err) {
       if (
         err instanceof ApiClientError &&
-        err.code === "TICKET_VERSION_CONFLICT"
+        err.code === "TASK_VERSION_CONFLICT"
       ) {
         await refetch();
         setError(
-          "This ticket was updated by another room member. It has been refreshed — reopen it and reapply your changes.",
+          "This task was updated by another room member. It has been refreshed — reopen it and reapply your changes.",
         );
       } else {
         setError(
-          err instanceof Error ? err.message : "Could not save the ticket",
+          err instanceof Error ? err.message : "Could not save the task",
         );
       }
       setPending(false);
@@ -103,7 +103,7 @@ export function TicketForm({
           name="title"
           required
           maxLength={200}
-          defaultValue={ticket?.title ?? ""}
+          defaultValue={task?.title ?? ""}
           placeholder="Short summary of the work"
         />
       </div>
@@ -114,7 +114,7 @@ export function TicketForm({
           id="description"
           name="description"
           maxLength={5000}
-          defaultValue={ticket?.description ?? ""}
+          defaultValue={task?.description ?? ""}
           placeholder="Optional details, acceptance criteria, links…"
         />
       </div>
@@ -125,7 +125,7 @@ export function TicketForm({
           <Select
             id="status"
             name="status"
-            defaultValue={ticket?.status ?? "BACKLOG"}
+            defaultValue={task?.status ?? "BACKLOG"}
           >
             {STATUS_ORDER.map((s) => (
               <option key={s} value={s}>
@@ -139,7 +139,7 @@ export function TicketForm({
           <Select
             id="priority"
             name="priority"
-            defaultValue={ticket?.priority ?? "MEDIUM"}
+            defaultValue={task?.priority ?? "MEDIUM"}
           >
             {PRIORITY_ORDER.map((p) => (
               <option key={p} value={p}>
@@ -155,7 +155,7 @@ export function TicketForm({
         <Select
           id="assigneeId"
           name="assigneeId"
-          defaultValue={ticket?.assignee?.id ?? ""}
+          defaultValue={task?.assignee?.id ?? ""}
         >
           <option value="">Unassigned</option>
           {board.members.map((m) => (
@@ -180,7 +180,7 @@ export function TicketForm({
           {pending
             ? "Saving…"
             : mode === "create"
-              ? "Create ticket"
+              ? "Create task"
               : "Save changes"}
         </Button>
       </div>

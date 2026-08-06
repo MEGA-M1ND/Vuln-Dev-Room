@@ -11,7 +11,7 @@ type Params = { params: Promise<{ runId: string }> };
  * POST /api/runs/[runId]/review — start a reviewer-agent run reviewing this
  * run (OWNER/ENGINEER; reuses run:create, since this is "starting a run").
  * `runId` is the SOURCE run being reviewed; the new run lands on the same
- * ticket, since a review never touches the repository or sandbox.
+ * task, since a review never touches the repository or sandbox.
  */
 export async function POST(_req: NextRequest, { params }: Params) {
   try {

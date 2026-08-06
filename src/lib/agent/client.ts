@@ -11,7 +11,7 @@ import { ApiError } from "@/lib/api/errors";
 export type StartRunPayload = {
   runId: string;
   roomId: string;
-  ticketId: string;
+  taskId: string;
   title: string;
   description: string | null;
   agentId: string;
@@ -214,7 +214,7 @@ export async function forkAgentRun(
 /**
  * Reviewer-agent (roadmap Phase 5): ask the runtime to review `sourceRunId`
  * from `runId` (already created by the web app, on the source's own
- * ticket). Fire-and-return like `startAgentRun` — the runtime reviews in the
+ * task). Fire-and-return like `startAgentRun` — the runtime reviews in the
  * background and reports SUCCEEDED/FAILED via the usual notifier/polling
  * path, since a real model call may be slow.
  */

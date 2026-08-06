@@ -96,7 +96,7 @@ export async function getPlaybook(
 /**
  * Build a suggested playbook from a successful run, for a human to review.
  *
- * Only sanitized, reusable material is carried across: the ticket's intent, the
+ * Only sanitized, reusable material is carried across: the task's intent, the
  * plan outline, and a test summary. The diff is intentionally NOT included.
  */
 export async function buildDraftFromRun(
@@ -112,7 +112,7 @@ export async function buildDraftFromRun(
   const run = await prisma.agentRun.findFirst({
     where: { id: runId, roomId },
     include: {
-      ticket: { select: { title: true, description: true } },
+      task: { select: { title: true, description: true } },
       artifacts: {
         where: { type: { in: ["PLAN", "TEST_RESULT"] } },
         orderBy: { sequence: "asc" },
@@ -137,13 +137,13 @@ export async function buildDraftFromRun(
       : null;
 
   return {
-    title: run.ticket.title,
+    title: run.task.title,
     description:
       testPassed === true
         ? "Reusable recipe from a run whose tests passed."
         : "Reusable recipe distilled from a successful run.",
-    // The reusable instruction, not the one-off ticket text.
-    templatePrompt: run.ticket.description?.trim() || run.ticket.title,
+    // The reusable instruction, not the one-off task text.
+    templatePrompt: run.task.description?.trim() || run.task.title,
     planTemplate: plan?.contentText ?? "",
     tags: [],
   };

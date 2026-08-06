@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * Room roster. Online members are listed first, then offline. Each row shows
- * presence status and, when available, the ticket the member is currently
+ * presence status and, when available, the task the member is currently
  * viewing. Presence status is conveyed by text + a labelled dot (not color
  * alone).
  */
@@ -20,16 +20,16 @@ export function RoomRoster() {
 
   const activityByUser = React.useMemo(() => {
     const map = new Map<string, string | null>();
-    for (const o of others) map.set(o.id, o.selectedTicketId);
+    for (const o of others) map.set(o.id, o.selectedTaskId);
     return map;
   }, [others]);
 
-  const ticketTitle = React.useCallback(
-    (ticketId: string | null | undefined) =>
-      ticketId
-        ? (board.tickets.find((t) => t.id === ticketId)?.title ?? null)
+  const taskTitle = React.useCallback(
+    (taskId: string | null | undefined) =>
+      taskId
+        ? (board.tasks.find((t) => t.id === taskId)?.title ?? null)
         : null,
-    [board.tickets],
+    [board.tasks],
   );
 
   const isOnline = (userId: string) =>
@@ -60,7 +60,7 @@ export function RoomRoster() {
           const viewing =
             m.userId === currentUserId
               ? null
-              : ticketTitle(activityByUser.get(m.userId));
+              : taskTitle(activityByUser.get(m.userId));
           return (
             <li
               key={m.userId}

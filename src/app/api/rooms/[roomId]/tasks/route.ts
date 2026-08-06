@@ -5,41 +5,41 @@ import {
   requireRoomPermission,
 } from "@/lib/auth/guards";
 import { handleRouteError } from "@/lib/api/errors";
-import { createTicketSchema } from "@/lib/validation/schemas";
-import { createTicket, listRoomTickets } from "@/lib/tickets/service";
+import { createTaskSchema } from "@/lib/validation/schemas";
+import { createTask, listRoomTasks } from "@/lib/tasks/service";
 import { broadcastRoomEvent } from "@/lib/liveblocks/server";
 
 type Params = { params: Promise<{ roomId: string }> };
 
-// GET /api/rooms/[roomId]/tickets — authoritative ticket list.
+// GET /api/rooms/[roomId]/tasks — authoritative task list.
 export async function GET(_req: NextRequest, { params }: Params) {
   try {
     const { roomId } = await params;
     await requireRoomMembership(roomId);
-    const tickets = await listRoomTickets(roomId);
-    return NextResponse.json({ tickets });
+    const tasks = await listRoomTasks(roomId);
+    return NextResponse.json({ tasks });
   } catch (error) {
     return handleRouteError(error);
   }
 }
 
-// POST /api/rooms/[roomId]/tickets — create a ticket (requires ticket:create).
+// POST /api/rooms/[roomId]/tasks — create a task (requires task:create).
 export async function POST(req: NextRequest, { params }: Params) {
   try {
     const { roomId } = await params;
-    const ctx = await requireRoomPermission(roomId, "ticket:create");
+    const ctx = await requireRoomPermission(roomId, "task:create");
     const body = await req.json().catch(() => ({}));
-    const input = createTicketSchema.parse(body);
+    const input = createTaskSchema.parse(body);
 
-    const ticket = await createTicket(roomId, ctx.user.id, input);
+    const task = await createTask(roomId, ctx.user.id, input);
 
     await broadcastRoomEvent(roomId, {
-      type: "TICKET_CREATED",
+      type: "TASK_CREATED",
       roomId,
-      ticketId: ticket.id,
+      taskId: task.id,
     });
 
-    return NextResponse.json({ ticket }, { status: 201 });
+    return NextResponse.json({ task }, { status: 201 });
   } catch (error) {
     return handleRouteError(error);
   }

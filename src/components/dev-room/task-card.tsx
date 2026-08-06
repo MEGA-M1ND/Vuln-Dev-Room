@@ -1,9 +1,9 @@
 "use client";
 
 import * as React from "react";
-import type { TicketStatus } from "@prisma/client";
+import type { AgentTaskStatus } from "@prisma/client";
 
-import type { TicketDTO } from "@/lib/types";
+import type { AgentTaskDTO } from "@/lib/types";
 import { useBoard } from "@/components/dev-room/board-context";
 import { can } from "@/lib/permissions";
 import { ApiClientError } from "@/lib/client/api";
@@ -13,38 +13,38 @@ import {
   PRIORITY_STYLES,
   STATUS_LABELS,
   STATUS_ORDER,
-} from "@/components/dev-room/ticket-meta";
-import { TicketViewers } from "@/components/dev-room/ticket-viewers";
+} from "@/components/dev-room/task-meta";
+import { AgentTaskViewers } from "@/components/dev-room/task-viewers";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-export function TicketCard({
-  ticket,
+export function AgentTaskCard({
+  task,
   draggable,
   realtimeEnabled,
 }: {
-  ticket: TicketDTO;
+  task: AgentTaskDTO;
   draggable: boolean;
   realtimeEnabled: boolean;
 }) {
-  const { selectedTicketId, selectTicket, role, moveTicket, refetch } =
+  const { selectedTaskId, selectTask, role, moveTask, refetch } =
     useBoard();
-  const isSelected = selectedTicketId === ticket.id;
-  const canMove = can(role, "ticket:move");
+  const isSelected = selectedTaskId === task.id;
+  const canMove = can(role, "task:move");
 
-  async function onStatusChange(next: TicketStatus) {
-    if (next === ticket.status) return;
+  async function onStatusChange(next: AgentTaskStatus) {
+    if (next === task.status) return;
     try {
-      await moveTicket(ticket.id, next, ticket.version);
+      await moveTask(task.id, next, task.version);
     } catch (err) {
       await refetch();
       if (
         err instanceof ApiClientError &&
-        err.code === "TICKET_VERSION_CONFLICT"
+        err.code === "TASK_VERSION_CONFLICT"
       ) {
         window.alert(
-          "This ticket was updated by another room member. The board has been refreshed — please try again.",
+          "This task was updated by another room member. The board has been refreshed — please try again.",
         );
       }
     }
@@ -54,8 +54,8 @@ export function TicketCard({
     <div
       draggable={draggable}
       onDragStart={(e) => {
-        e.dataTransfer.setData("text/ticket-id", ticket.id);
-        e.dataTransfer.setData("text/ticket-version", String(ticket.version));
+        e.dataTransfer.setData("text/task-id", task.id);
+        e.dataTransfer.setData("text/task-version", String(task.version));
         e.dataTransfer.effectAllowed = "move";
       }}
       className={cn(
@@ -65,32 +65,32 @@ export function TicketCard({
     >
       <button
         type="button"
-        onClick={() => selectTicket(ticket.id)}
+        onClick={() => selectTask(task.id)}
         className="w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
         aria-pressed={isSelected}
-        aria-label={`Open ticket: ${ticket.title}`}
+        aria-label={`Open task: ${task.title}`}
       >
         <div className="flex items-start justify-between gap-2">
-          <span className="text-sm font-medium">{ticket.title}</span>
+          <span className="text-sm font-medium">{task.title}</span>
         </div>
       </button>
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Badge className={cn("gap-1", PRIORITY_STYLES[ticket.priority])}>
-          <span aria-hidden="true">{PRIORITY_GLYPH[ticket.priority]}</span>
-          {PRIORITY_LABELS[ticket.priority]}
+        <Badge className={cn("gap-1", PRIORITY_STYLES[task.priority])}>
+          <span aria-hidden="true">{PRIORITY_GLYPH[task.priority]}</span>
+          {PRIORITY_LABELS[task.priority]}
         </Badge>
 
-        {ticket.assignee ? (
+        {task.assignee ? (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Avatar
-              name={ticket.assignee.name}
-              id={ticket.assignee.id}
-              image={ticket.assignee.image}
+              name={task.assignee.name}
+              id={task.assignee.id}
+              image={task.assignee.image}
               size={20}
             />
             <span className="max-w-[6rem] truncate">
-              {ticket.assignee.name}
+              {task.assignee.name}
             </span>
           </span>
         ) : (
@@ -100,19 +100,19 @@ export function TicketCard({
 
       {realtimeEnabled ? (
         <div className="mt-2">
-          <TicketViewers ticketId={ticket.id} />
+          <AgentTaskViewers taskId={task.id} />
         </div>
       ) : null}
 
       {canMove ? (
         <div className="mt-3">
-          <label className="sr-only" htmlFor={`status-${ticket.id}`}>
-            Change status for {ticket.title}
+          <label className="sr-only" htmlFor={`status-${task.id}`}>
+            Change status for {task.title}
           </label>
           <select
-            id={`status-${ticket.id}`}
-            value={ticket.status}
-            onChange={(e) => onStatusChange(e.target.value as TicketStatus)}
+            id={`status-${task.id}`}
+            value={task.status}
+            onChange={(e) => onStatusChange(e.target.value as AgentTaskStatus)}
             onClick={(e) => e.stopPropagation()}
             className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >

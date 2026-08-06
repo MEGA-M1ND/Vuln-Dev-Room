@@ -84,7 +84,7 @@ to" — architecturally cannot. Three hard walls compound:
    it has no way to go looking — even though a `search_repository` tool already
    exists in the toolset and goes unused by the planner.
 
-3. **The demo repo is a planted stub.** `agentguard-demo` contains:
+3. **The demo repo is a planted stub.** `demo-service` contains:
 
    ```python
    def allow(self) -> bool:
@@ -178,7 +178,7 @@ configured repo, since none has a manifest). Shipped:
   output.
 - `cleanup()` removes the per-run snapshot image, not just the container.
 - A second fixture repo (`deps-demo`, pinned to `six==1.16.0`) alongside
-  `agentguard-demo`, and integration tests (Docker-gated, run in CI) proving:
+  `demo-service`, and integration tests (Docker-gated, run in CI) proving:
   the agent-phase container has no network with or without a setup phase
   having run; the installed dependency is actually importable in the agent
   phase; a broken manifest raises `SandboxSetupError` rather than silently

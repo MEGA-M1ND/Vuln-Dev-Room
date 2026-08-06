@@ -62,7 +62,7 @@ def test_cancel_before_approval_writes_nothing(docker_required, demo_repo):
         cfg = {"configurable": {"thread_id": "cancel-1"}}
 
         graph.invoke(
-            {"run_id": "r", "ticket_title": "Implement", "ticket_description": ""},
+            {"run_id": "r", "task_title": "Implement", "task_description": ""},
             config=cfg,
         )
         # Parked before apply_edits, nothing written yet.
@@ -105,7 +105,7 @@ def test_cancel_stops_before_tests_and_leaves_checkpoint(docker_required, demo_r
         graph = _build_graph(ctx, MemorySaver())
         cfg = {"configurable": {"thread_id": "cancel-2"}}
         graph.invoke(
-            {"run_id": "r", "ticket_title": "Implement", "ticket_description": ""},
+            {"run_id": "r", "task_title": "Implement", "task_description": ""},
             config=cfg,
         )
 
@@ -164,7 +164,7 @@ def test_redirect_guidance_is_consumed_and_replans(docker_required, demo_repo):
         graph = _build_graph(ctx, MemorySaver())
         cfg = {"configurable": {"thread_id": "redirect-1"}}
         graph.invoke(
-            {"run_id": "r", "ticket_title": "Implement", "ticket_description": "base"},
+            {"run_id": "r", "task_title": "Implement", "task_description": "base"},
             config=cfg,
         )
 
@@ -196,7 +196,7 @@ def test_replan_after_approval_returns_to_gate(docker_required, demo_repo):
         graph = _build_graph(ctx, MemorySaver())
         cfg = {"configurable": {"thread_id": "replan-1"}}
         graph.invoke(
-            {"run_id": "r", "ticket_title": "Implement", "ticket_description": ""},
+            {"run_id": "r", "task_title": "Implement", "task_description": ""},
             config=cfg,
         )
         assert graph.get_state(cfg).next == ("apply_edits",)
@@ -238,7 +238,7 @@ def test_steering_mid_apply_edits_aborts_before_any_write(docker_required, demo_
         graph = _build_graph(ctx, MemorySaver())
         cfg = {"configurable": {"thread_id": "steer-apply-edits"}}
         graph.invoke(
-            {"run_id": "r", "ticket_title": "Implement", "ticket_description": ""},
+            {"run_id": "r", "task_title": "Implement", "task_description": ""},
             config=cfg,
         )
         assert graph.get_state(cfg).next == ("apply_edits",)
@@ -283,7 +283,7 @@ def test_steering_mid_run_tests_aborts_after_edits_already_applied(
         graph = _build_graph(ctx, MemorySaver())
         cfg = {"configurable": {"thread_id": "steer-run-tests"}}
         graph.invoke(
-            {"run_id": "r", "ticket_title": "Implement", "ticket_description": ""},
+            {"run_id": "r", "task_title": "Implement", "task_description": ""},
             config=cfg,
         )
         assert graph.get_state(cfg).next == ("apply_edits",)
@@ -323,7 +323,7 @@ def test_steering_mid_capture_diff_aborts_after_tests_already_ran(
         graph = _build_graph(ctx, MemorySaver())
         cfg = {"configurable": {"thread_id": "steer-capture-diff"}}
         graph.invoke(
-            {"run_id": "r", "ticket_title": "Implement", "ticket_description": ""},
+            {"run_id": "r", "task_title": "Implement", "task_description": ""},
             config=cfg,
         )
         assert graph.get_state(cfg).next == ("apply_edits",)
@@ -360,7 +360,7 @@ def test_steering_never_fires_for_plan_change_or_inspect(docker_required, demo_r
         # inspect_repository + plan_change run despite guidance being
         # "pending" throughout — RunRedirected must not fire before the gate.
         graph.invoke(
-            {"run_id": "r", "ticket_title": "Implement", "ticket_description": ""},
+            {"run_id": "r", "task_title": "Implement", "task_description": ""},
             config=cfg,
         )
         assert graph.get_state(cfg).next == ("apply_edits",)

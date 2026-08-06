@@ -23,7 +23,7 @@ export type PresenceActivity =
 /** Ephemeral per-user awareness. Reset when the user leaves or deselects. */
 export type Presence = {
   cursor: { x: number; y: number } | null;
-  selectedTicketId: string | null;
+  selectedTaskId: string | null;
   /** The agent run this user is currently watching, if any. */
   selectedRunId: string | null;
   activity: PresenceActivity | string | null;
@@ -48,7 +48,7 @@ export type RoomEvent = RoomBroadcastEvent;
 /** Liveblocks Storage is intentionally empty in Stage 1. */
 export type Storage = Record<string, never>;
 
-/** Metadata stored on comment threads (which ticket a thread belongs to). */
+/** Metadata stored on comment threads (which task a thread belongs to). */
 export type ThreadMetadata = {
-  ticketId: string;
+  taskId: string;
 };

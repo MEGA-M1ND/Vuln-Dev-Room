@@ -4,7 +4,7 @@ import {
   nextPositionAfter,
   positionBetween,
   isValidStatusTransition,
-} from "@/lib/tickets/ordering";
+} from "@/lib/tasks/ordering";
 
 describe("nextPositionAfter", () => {
   it("returns a base step for an empty column", () => {

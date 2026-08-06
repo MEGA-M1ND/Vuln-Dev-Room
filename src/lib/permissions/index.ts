@@ -12,11 +12,11 @@ export type RoomAction =
   | "room:read"
   | "room:update"
   | "membership:manage"
-  | "ticket:create"
-  | "ticket:edit"
-  | "ticket:move"
-  | "ticket:assign"
-  | "ticket:delete"
+  | "task:create"
+  | "task:edit"
+  | "task:move"
+  | "task:assign"
+  | "task:delete"
   | "comment:read"
   | "comment:create"
   | "presence:view"
@@ -41,11 +41,11 @@ const OWNER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "room:read",
   "room:update",
   "membership:manage",
-  "ticket:create",
-  "ticket:edit",
-  "ticket:move",
-  "ticket:assign",
-  "ticket:delete",
+  "task:create",
+  "task:edit",
+  "task:move",
+  "task:assign",
+  "task:delete",
   "comment:read",
   "comment:create",
   "presence:view",
@@ -64,10 +64,10 @@ const OWNER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
 
 const ENGINEER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "room:read",
-  "ticket:create",
-  "ticket:edit",
-  "ticket:move",
-  "ticket:assign",
+  "task:create",
+  "task:edit",
+  "task:move",
+  "task:assign",
   "comment:read",
   "comment:create",
   "presence:view",
@@ -85,7 +85,7 @@ const ENGINEER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
 ]);
 
 // Stage 1 decision: VIEWERs MAY add comments (documented in README). They can
-// never mutate tickets or room state.
+// never mutate tasks or room state.
 const VIEWER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "room:read",
   "comment:read",
@@ -108,11 +108,11 @@ export function can(role: MembershipRole, action: RoomAction): boolean {
   return ROLE_ACTIONS[role].has(action);
 }
 
-/** True when the role may mutate ticket state in any way. */
-export function canMutateTickets(role: MembershipRole): boolean {
+/** True when the role may mutate task state in any way. */
+export function canMutateTasks(role: MembershipRole): boolean {
   return (
-    can(role, "ticket:create") ||
-    can(role, "ticket:edit") ||
-    can(role, "ticket:move")
+    can(role, "task:create") ||
+    can(role, "task:edit") ||
+    can(role, "task:move")
   );
 }

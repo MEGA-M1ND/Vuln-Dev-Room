@@ -1,4 +1,4 @@
-"""A tiny token-bucket rate limiter used by the AgentGuard demo API."""
+"""A tiny token-bucket rate limiter used by the demo service API."""
 
 
 class TokenBucket:

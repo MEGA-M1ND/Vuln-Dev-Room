@@ -1,23 +1,23 @@
 "use client";
 
 import * as React from "react";
-import type { TicketStatus } from "@prisma/client";
+import type { AgentTaskStatus } from "@prisma/client";
 
 import { useBoard } from "@/components/dev-room/board-context";
 import { usePresence } from "@/components/dev-room/presence-context";
 import { can } from "@/lib/permissions";
 import { ApiClientError } from "@/lib/client/api";
-import { STATUS_LABELS } from "@/components/dev-room/ticket-meta";
-import { TicketCard } from "@/components/dev-room/ticket-card";
+import { STATUS_LABELS } from "@/components/dev-room/task-meta";
+import { AgentTaskCard } from "@/components/dev-room/task-card";
 import { cn } from "@/lib/utils";
 
-export function KanbanColumn({ status }: { status: TicketStatus }) {
-  const { board, role, moveTicket, refetch } = useBoard();
+export function KanbanColumn({ status }: { status: AgentTaskStatus }) {
+  const { board, role, moveTask, refetch } = useBoard();
   const { enabled } = usePresence();
   const [dragOver, setDragOver] = React.useState(false);
-  const canMove = can(role, "ticket:move");
+  const canMove = can(role, "task:move");
 
-  const tickets = board.tickets
+  const tasks = board.tasks
     .filter((t) => t.status === status)
     .sort((a, b) => a.position - b.position);
 
@@ -25,20 +25,20 @@ export function KanbanColumn({ status }: { status: TicketStatus }) {
     e.preventDefault();
     setDragOver(false);
     if (!canMove) return;
-    const ticketId = e.dataTransfer.getData("text/ticket-id");
-    const version = Number(e.dataTransfer.getData("text/ticket-version"));
-    if (!ticketId || Number.isNaN(version)) return;
+    const taskId = e.dataTransfer.getData("text/task-id");
+    const version = Number(e.dataTransfer.getData("text/task-version"));
+    if (!taskId || Number.isNaN(version)) return;
 
-    const ticket = board.tickets.find((t) => t.id === ticketId);
-    if (!ticket || ticket.status === status) return;
+    const task = board.tasks.find((t) => t.id === taskId);
+    if (!task || task.status === status) return;
 
     try {
-      await moveTicket(ticketId, status, version);
+      await moveTask(taskId, status, version);
     } catch (err) {
-      if (err instanceof ApiClientError && err.code === "TICKET_VERSION_CONFLICT") {
+      if (err instanceof ApiClientError && err.code === "TASK_VERSION_CONFLICT") {
         await refetch();
         window.alert(
-          "This ticket was updated by another room member. The board has been refreshed — please try again.",
+          "This task was updated by another room member. The board has been refreshed — please try again.",
         );
       } else {
         await refetch();
@@ -66,24 +66,24 @@ export function KanbanColumn({ status }: { status: TicketStatus }) {
         <h3 className="text-sm font-semibold">{STATUS_LABELS[status]}</h3>
         <span
           className="rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground"
-          aria-label={`${tickets.length} tickets`}
+          aria-label={`${tasks.length} tasks`}
         >
-          {tickets.length}
+          {tasks.length}
         </span>
       </div>
       <ul className="flex min-h-[4rem] flex-1 flex-col gap-2 overflow-y-auto p-2">
-        {tickets.map((ticket) => (
-          <li key={ticket.id}>
-            <TicketCard
-              ticket={ticket}
+        {tasks.map((task) => (
+          <li key={task.id}>
+            <AgentTaskCard
+              task={task}
               draggable={canMove}
               realtimeEnabled={enabled}
             />
           </li>
         ))}
-        {tickets.length === 0 ? (
+        {tasks.length === 0 ? (
           <li className="px-2 py-6 text-center text-xs text-muted-foreground">
-            No tickets
+            No tasks
           </li>
         ) : null}
       </ul>

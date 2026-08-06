@@ -55,7 +55,7 @@ def test_reject_transitions_to_cancelled(client, monkeypatch):
             "id": "r1",
             "status": "AWAITING_APPROVAL",
             "roomId": "room",
-            "targetRepositoryKey": "agentguard-demo",
+            "targetRepositoryKey": "demo-service",
         },
     )
     monkeypatch.setattr(

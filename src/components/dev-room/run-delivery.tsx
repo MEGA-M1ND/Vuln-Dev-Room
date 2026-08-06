@@ -155,7 +155,7 @@ export function RunDelivery({ run }: { run: RunDTO }) {
         open={open}
         onClose={() => setOpen(false)}
         title="Create a draft pull request"
-        description="Dev Room will push this run's reviewed changes to a new branch and open a draft pull request. Nothing is merged, and your default branch is never modified."
+        description="Agent Dev Room will push this run's reviewed changes to a new branch and open a draft pull request. Nothing is merged, and your default branch is never modified."
       >
         <form
           onSubmit={(e) => {

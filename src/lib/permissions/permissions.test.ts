@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { can, canMutateTickets, type RoomAction } from "@/lib/permissions";
+import { can, canMutateTasks, type RoomAction } from "@/lib/permissions";
 
 describe("permissions matrix", () => {
   it("OWNER can do everything including delete and manage memberships", () => {
@@ -8,11 +8,11 @@ describe("permissions matrix", () => {
       "room:read",
       "room:update",
       "membership:manage",
-      "ticket:create",
-      "ticket:edit",
-      "ticket:move",
-      "ticket:assign",
-      "ticket:delete",
+      "task:create",
+      "task:edit",
+      "task:move",
+      "task:assign",
+      "task:delete",
       "comment:read",
       "comment:create",
       "presence:view",
@@ -20,35 +20,35 @@ describe("permissions matrix", () => {
     for (const a of ownerActions) expect(can("OWNER", a)).toBe(true);
   });
 
-  it("ENGINEER can mutate tickets but cannot delete or manage room/members", () => {
-    expect(can("ENGINEER", "ticket:create")).toBe(true);
-    expect(can("ENGINEER", "ticket:edit")).toBe(true);
-    expect(can("ENGINEER", "ticket:move")).toBe(true);
-    expect(can("ENGINEER", "ticket:assign")).toBe(true);
+  it("ENGINEER can mutate tasks but cannot delete or manage room/members", () => {
+    expect(can("ENGINEER", "task:create")).toBe(true);
+    expect(can("ENGINEER", "task:edit")).toBe(true);
+    expect(can("ENGINEER", "task:move")).toBe(true);
+    expect(can("ENGINEER", "task:assign")).toBe(true);
     expect(can("ENGINEER", "comment:create")).toBe(true);
 
-    expect(can("ENGINEER", "ticket:delete")).toBe(false);
+    expect(can("ENGINEER", "task:delete")).toBe(false);
     expect(can("ENGINEER", "room:update")).toBe(false);
     expect(can("ENGINEER", "membership:manage")).toBe(false);
   });
 
-  it("VIEWER can read and comment but cannot mutate tickets", () => {
+  it("VIEWER can read and comment but cannot mutate tasks", () => {
     expect(can("VIEWER", "room:read")).toBe(true);
     expect(can("VIEWER", "comment:read")).toBe(true);
     expect(can("VIEWER", "comment:create")).toBe(true);
     expect(can("VIEWER", "presence:view")).toBe(true);
 
-    expect(can("VIEWER", "ticket:create")).toBe(false);
-    expect(can("VIEWER", "ticket:edit")).toBe(false);
-    expect(can("VIEWER", "ticket:move")).toBe(false);
-    expect(can("VIEWER", "ticket:assign")).toBe(false);
-    expect(can("VIEWER", "ticket:delete")).toBe(false);
+    expect(can("VIEWER", "task:create")).toBe(false);
+    expect(can("VIEWER", "task:edit")).toBe(false);
+    expect(can("VIEWER", "task:move")).toBe(false);
+    expect(can("VIEWER", "task:assign")).toBe(false);
+    expect(can("VIEWER", "task:delete")).toBe(false);
   });
 
-  it("canMutateTickets reflects role capability", () => {
-    expect(canMutateTickets("OWNER")).toBe(true);
-    expect(canMutateTickets("ENGINEER")).toBe(true);
-    expect(canMutateTickets("VIEWER")).toBe(false);
+  it("canMutateTasks reflects role capability", () => {
+    expect(canMutateTasks("OWNER")).toBe(true);
+    expect(canMutateTasks("ENGINEER")).toBe(true);
+    expect(canMutateTasks("VIEWER")).toBe(false);
   });
 
   it("agent runs: OWNER and ENGINEER can start; VIEWER cannot", () => {

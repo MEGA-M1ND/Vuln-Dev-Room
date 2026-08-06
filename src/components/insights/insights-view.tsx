@@ -86,7 +86,7 @@ export function InsightsView({
         <div className="rounded-xl border border-dashed border-border p-10 text-center">
           <h2 className="text-lg font-medium">No agent runs yet</h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-            Once your team starts running the agent on tickets, this page will
+            Once your team starts running the agent on tasks, this page will
             show how often runs land, how often people step in, and how long
             work takes.
           </p>

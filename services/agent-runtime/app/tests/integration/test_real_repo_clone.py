@@ -81,8 +81,8 @@ def test_clone_then_full_graph_run_produces_a_plan_from_a_file_the_agent_had_to_
             graph.invoke(
                 {
                     "run_id": "r",
-                    "ticket_title": "Implement the rate limiter",
-                    "ticket_description": "",
+                    "task_title": "Implement the rate limiter",
+                    "task_description": "",
                 },
                 config=cfg,
             )

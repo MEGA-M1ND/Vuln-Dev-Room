@@ -5,7 +5,7 @@ import type { MembershipRole } from "@prisma/client";
 
 /**
  * A Liveblocks-agnostic presence surface consumed by the roster, avatar stack
- * and ticket viewers. When Liveblocks is configured, `LiveblocksPresenceBridge`
+ * and task viewers. When Liveblocks is configured, `LiveblocksPresenceBridge`
  * fills this from live data. When it is not, `StaticPresenceProvider` supplies
  * an empty/disabled surface so the rest of the UI renders unchanged.
  */
@@ -16,7 +16,7 @@ export type PresenceUser = {
   avatar?: string;
   color: string;
   role: MembershipRole;
-  selectedTicketId: string | null;
+  selectedTaskId: string | null;
   /** The agent run this user is watching, if any. */
   selectedRunId: string | null;
   activity: string | null;
@@ -26,7 +26,7 @@ export type PresenceContextValue = {
   enabled: boolean;
   others: PresenceUser[];
   onlineUserIds: Set<string>;
-  viewersOf: (ticketId: string) => PresenceUser[];
+  viewersOf: (taskId: string) => PresenceUser[];
   /** Other users currently watching a given agent run. */
   watchersOf: (runId: string) => PresenceUser[];
   /** Publish what this user is doing (ephemeral; safe to call often). */

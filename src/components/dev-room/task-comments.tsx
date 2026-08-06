@@ -6,16 +6,16 @@ import { Composer, Thread } from "@liveblocks/react-ui";
 import "@liveblocks/react-ui/styles.css";
 
 /**
- * Realtime ticket discussion powered by Liveblocks Threads. Each ticket's
- * comments are the threads whose metadata.ticketId matches. New top-level
- * comments create a new thread tagged with this ticket; replies and typing
+ * Realtime task discussion powered by Liveblocks Threads. Each task's
+ * comments are the threads whose metadata.taskId matches. New top-level
+ * comments create a new thread tagged with this task; replies and typing
  * indicators are handled by the Liveblocks <Thread> / <Composer> components.
  *
  * Only rendered when Liveblocks is configured (inside a RoomProvider).
  */
-export function TicketComments({ ticketId }: { ticketId: string }) {
+export function AgentTaskComments({ taskId }: { taskId: string }) {
   const { threads, isLoading, error } = useThreads({
-    query: { metadata: { ticketId } },
+    query: { metadata: { taskId } },
   });
   const createThread = useCreateThread();
 
@@ -57,7 +57,7 @@ export function TicketComments({ ticketId }: { ticketId: string }) {
       <Composer
         onComposerSubmit={({ body }, event) => {
           event.preventDefault();
-          createThread({ body, metadata: { ticketId } });
+          createThread({ body, metadata: { taskId } });
         }}
         className="rounded-md border border-border bg-background"
       />

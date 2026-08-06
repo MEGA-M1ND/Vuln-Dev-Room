@@ -12,8 +12,8 @@ from typing import Any, TypedDict
 
 class AgentState(TypedDict, total=False):
     run_id: str
-    ticket_title: str
-    ticket_description: str
+    task_title: str
+    task_description: str
     language: str
     allowed_paths: list[str]
 

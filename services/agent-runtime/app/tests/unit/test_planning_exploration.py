@@ -61,7 +61,7 @@ def test_model_without_exploration_hook_makes_no_tool_calls():
     sandbox = StubSandbox(tree=["a.py"], files={"a.py": "print(1)\n"})
     graph, cfg, recorder = _graph_and_cfg(NeverExploresModel(), sandbox)
 
-    graph.invoke({"run_id": "r", "ticket_title": "t", "ticket_description": ""}, config=cfg)
+    graph.invoke({"run_id": "r", "task_title": "t", "task_description": ""}, config=cfg)
 
     event_types = [e[0] for e in recorder.events]
     assert "TOOL_CALL" not in event_types
@@ -85,7 +85,7 @@ def test_exploration_loop_is_capped_at_max_tool_calls():
     sandbox = StubSandbox(tree=["a.py"], files={"a.py": "print(1)\n"})
     graph, cfg, recorder = _graph_and_cfg(AlwaysExploresModel(), sandbox)
 
-    graph.invoke({"run_id": "r", "ticket_title": "t", "ticket_description": ""}, config=cfg)
+    graph.invoke({"run_id": "r", "task_title": "t", "task_description": ""}, config=cfg)
 
     tool_call_events = [e for e in recorder.events if e[0] == "TOOL_CALL"]
     assert len(tool_call_events) == MAX_PLANNING_TOOL_CALLS
@@ -126,7 +126,7 @@ def test_read_file_results_are_fed_back_into_the_final_plan_request():
     model = ReadTwoFilesModel()
     graph, cfg, recorder = _graph_and_cfg(model, sandbox)
 
-    graph.invoke({"run_id": "r", "ticket_title": "t", "ticket_description": ""}, config=cfg)
+    graph.invoke({"run_id": "r", "task_title": "t", "task_description": ""}, config=cfg)
 
     assert model.seen_excerpts == {"a.py": "content-a", "b.py": "content-b"}
     tool_calls = [e for e in recorder.events if e[0] == "TOOL_CALL"]
@@ -143,7 +143,7 @@ def test_replan_does_not_re_explore_the_repository():
     # a call, and the loop still terminates via the MAX_PLANNING_TOOL_CALLS cap.
     graph, cfg, recorder = _graph_and_cfg(model, sandbox)
 
-    graph.invoke({"run_id": "r", "ticket_title": "t", "ticket_description": ""}, config=cfg)
+    graph.invoke({"run_id": "r", "task_title": "t", "task_description": ""}, config=cfg)
     assert graph.get_state(cfg).next == ("apply_edits",)
     calls_after_first_plan = len([e for e in recorder.events if e[0] == "TOOL_CALL"])
     assert calls_after_first_plan > 0

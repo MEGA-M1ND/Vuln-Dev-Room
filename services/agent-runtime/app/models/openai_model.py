@@ -54,8 +54,8 @@ class OpenAIModel(Model):
             for path, content in sorted(request.file_excerpts.items())
         )
         user = (
-            f"Ticket title: {request.title}\n"
-            f"Ticket description: {request.description}\n"
+            f"AgentTask title: {request.title}\n"
+            f"AgentTask description: {request.description}\n"
             f"Language: {request.language}\n\n"
             f"Repository files (tree):\n{json.dumps(request.repo_tree, indent=2)}\n\n"
             f"File excerpts:\n{excerpts}\n"

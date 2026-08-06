@@ -1,19 +1,19 @@
 "use client";
 
 import * as React from "react";
-import type { MembershipRole, TicketStatus } from "@prisma/client";
+import type { MembershipRole, AgentTaskStatus } from "@prisma/client";
 
-import type { BoardDTO, TicketDTO } from "@/lib/types";
+import type { BoardDTO, AgentTaskDTO } from "@/lib/types";
 import { apiFetch, ApiClientError } from "@/lib/client/api";
 import type {
-  CreateTicketInput,
-  UpdateTicketInput,
+  CreateTaskInput,
+  UpdateTaskInput,
 } from "@/lib/validation/schemas";
 
 /**
  * Board state container. This is the client-side mirror of the authoritative
  * board fetched from Postgres. It exposes mutation helpers that call the REST
- * API and reconcile the returned (authoritative) ticket back into local state.
+ * API and reconcile the returned (authoritative) task back into local state.
  *
  * It is deliberately Liveblocks-agnostic: the board works even when realtime is
  * unconfigured. Liveblocks only calls `refetch()` when it receives an
@@ -25,23 +25,23 @@ type BoardContextValue = {
   currentUserId: string;
   agentEnabled: boolean;
   demoMode: boolean;
-  selectedTicketId: string | null;
-  selectTicket: (id: string | null) => void;
-  selectedTicket: TicketDTO | null;
+  selectedTaskId: string | null;
+  selectTask: (id: string | null) => void;
+  selectedTask: AgentTaskDTO | null;
   refetch: () => Promise<void>;
   refreshing: boolean;
-  createTicket: (input: CreateTicketInput) => Promise<TicketDTO>;
-  updateTicket: (
-    ticketId: string,
-    input: UpdateTicketInput,
-  ) => Promise<TicketDTO>;
-  moveTicket: (
-    ticketId: string,
-    status: TicketStatus,
+  createTask: (input: CreateTaskInput) => Promise<AgentTaskDTO>;
+  updateTask: (
+    taskId: string,
+    input: UpdateTaskInput,
+  ) => Promise<AgentTaskDTO>;
+  moveTask: (
+    taskId: string,
+    status: AgentTaskStatus,
     expectedVersion: number,
     position?: number,
-  ) => Promise<TicketDTO>;
-  deleteTicket: (ticketId: string, expectedVersion: number) => Promise<void>;
+  ) => Promise<AgentTaskDTO>;
+  deleteTask: (taskId: string, expectedVersion: number) => Promise<void>;
 };
 
 const BoardContext = React.createContext<BoardContextValue | null>(null);
@@ -66,7 +66,7 @@ export function BoardProvider({
   children: React.ReactNode;
 }) {
   const [board, setBoard] = React.useState<BoardDTO>(initialBoard);
-  const [selectedTicketId, setSelectedTicketId] = React.useState<string | null>(
+  const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>(
     null,
   );
   const [refreshing, setRefreshing] = React.useState(false);
@@ -84,94 +84,94 @@ export function BoardProvider({
     }
   }, [roomId]);
 
-  const upsertTicket = React.useCallback((ticket: TicketDTO) => {
+  const upsertTask = React.useCallback((task: AgentTaskDTO) => {
     setBoard((prev) => {
-      const exists = prev.tickets.some((t) => t.id === ticket.id);
-      const tickets = exists
-        ? prev.tickets.map((t) => (t.id === ticket.id ? ticket : t))
-        : [...prev.tickets, ticket];
-      return { ...prev, tickets };
+      const exists = prev.tasks.some((t) => t.id === task.id);
+      const tasks = exists
+        ? prev.tasks.map((t) => (t.id === task.id ? task : t))
+        : [...prev.tasks, task];
+      return { ...prev, tasks };
     });
   }, []);
 
-  const createTicket = React.useCallback(
-    async (input: CreateTicketInput) => {
-      const { ticket } = await apiFetch<{ ticket: TicketDTO }>(
-        `/api/rooms/${roomId}/tickets`,
+  const createTask = React.useCallback(
+    async (input: CreateTaskInput) => {
+      const { task } = await apiFetch<{ task: AgentTaskDTO }>(
+        `/api/rooms/${roomId}/tasks`,
         { method: "POST", body: JSON.stringify(input) },
       );
-      upsertTicket(ticket);
-      return ticket;
+      upsertTask(task);
+      return task;
     },
-    [roomId, upsertTicket],
+    [roomId, upsertTask],
   );
 
-  const updateTicket = React.useCallback(
-    async (ticketId: string, input: UpdateTicketInput) => {
-      const { ticket } = await apiFetch<{ ticket: TicketDTO }>(
-        `/api/tickets/${ticketId}`,
+  const updateTask = React.useCallback(
+    async (taskId: string, input: UpdateTaskInput) => {
+      const { task } = await apiFetch<{ task: AgentTaskDTO }>(
+        `/api/tasks/${taskId}`,
         { method: "PATCH", body: JSON.stringify(input) },
       );
-      upsertTicket(ticket);
-      return ticket;
+      upsertTask(task);
+      return task;
     },
-    [upsertTicket],
+    [upsertTask],
   );
 
-  const moveTicket = React.useCallback(
+  const moveTask = React.useCallback(
     async (
-      ticketId: string,
-      status: TicketStatus,
+      taskId: string,
+      status: AgentTaskStatus,
       expectedVersion: number,
       position?: number,
     ) => {
       // Optimistic: reflect the move immediately so it doesn't wait on a round
       // trip. Rolled back below if the request fails (e.g. a version conflict).
-      let previous: TicketDTO | undefined;
+      let previous: AgentTaskDTO | undefined;
       setBoard((prev) => {
-        previous = prev.tickets.find((t) => t.id === ticketId);
+        previous = prev.tasks.find((t) => t.id === taskId);
         return {
           ...prev,
-          tickets: prev.tickets.map((t) =>
-            t.id === ticketId ? { ...t, status } : t,
+          tasks: prev.tasks.map((t) =>
+            t.id === taskId ? { ...t, status } : t,
           ),
         };
       });
       try {
-        const { ticket } = await apiFetch<{ ticket: TicketDTO }>(
-          `/api/tickets/${ticketId}/move`,
+        const { task } = await apiFetch<{ task: AgentTaskDTO }>(
+          `/api/tasks/${taskId}/move`,
           {
             method: "POST",
             body: JSON.stringify({ status, expectedVersion, position }),
           },
         );
-        upsertTicket(ticket);
-        return ticket;
+        upsertTask(task);
+        return task;
       } catch (err) {
-        if (previous) upsertTicket(previous);
+        if (previous) upsertTask(previous);
         throw err;
       }
     },
-    [upsertTicket],
+    [upsertTask],
   );
 
-  const deleteTicket = React.useCallback(
-    async (ticketId: string, expectedVersion: number) => {
+  const deleteTask = React.useCallback(
+    async (taskId: string, expectedVersion: number) => {
       // expectedVersion is not enforced on delete server-side in Stage 1, but
       // we keep the signature symmetric for a future conditional delete.
       void expectedVersion;
-      await apiFetch(`/api/tickets/${ticketId}`, { method: "DELETE" });
+      await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" });
       setBoard((prev) => ({
         ...prev,
-        tickets: prev.tickets.filter((t) => t.id !== ticketId),
+        tasks: prev.tasks.filter((t) => t.id !== taskId),
       }));
-      setSelectedTicketId((cur) => (cur === ticketId ? null : cur));
+      setSelectedTaskId((cur) => (cur === taskId ? null : cur));
     },
     [],
   );
 
-  const selectedTicket =
-    board.tickets.find((t) => t.id === selectedTicketId) ?? null;
+  const selectedTask =
+    board.tasks.find((t) => t.id === selectedTaskId) ?? null;
 
   const value: BoardContextValue = {
     board,
@@ -179,15 +179,15 @@ export function BoardProvider({
     currentUserId,
     agentEnabled,
     demoMode,
-    selectedTicketId,
-    selectTicket: setSelectedTicketId,
-    selectedTicket,
+    selectedTaskId,
+    selectTask: setSelectedTaskId,
+    selectedTask,
     refetch,
     refreshing,
-    createTicket,
-    updateTicket,
-    moveTicket,
-    deleteTicket,
+    createTask,
+    updateTask,
+    moveTask,
+    deleteTask,
   };
 
   return (

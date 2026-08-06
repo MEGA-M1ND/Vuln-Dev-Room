@@ -1,64 +1,64 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  createTicketSchema,
-  updateTicketSchema,
-  moveTicketSchema,
+  createTaskSchema,
+  updateTaskSchema,
+  moveTaskSchema,
   createRoomSchema,
 } from "@/lib/validation/schemas";
 
-describe("createTicketSchema", () => {
+describe("createTaskSchema", () => {
   it("requires a non-empty title", () => {
-    expect(createTicketSchema.safeParse({ title: "" }).success).toBe(false);
-    expect(createTicketSchema.safeParse({}).success).toBe(false);
+    expect(createTaskSchema.safeParse({ title: "" }).success).toBe(false);
+    expect(createTaskSchema.safeParse({}).success).toBe(false);
   });
 
   it("applies defaults for status and priority", () => {
-    const parsed = createTicketSchema.parse({ title: "Do the thing" });
+    const parsed = createTaskSchema.parse({ title: "Do the thing" });
     expect(parsed.status).toBe("BACKLOG");
     expect(parsed.priority).toBe("MEDIUM");
   });
 
   it("rejects invalid status/priority enums", () => {
     expect(
-      createTicketSchema.safeParse({ title: "x", status: "NOPE" }).success,
+      createTaskSchema.safeParse({ title: "x", status: "NOPE" }).success,
     ).toBe(false);
     expect(
-      createTicketSchema.safeParse({ title: "x", priority: "SUPER" }).success,
+      createTaskSchema.safeParse({ title: "x", priority: "SUPER" }).success,
     ).toBe(false);
   });
 
   it("trims and enforces the title length limit", () => {
-    const parsed = createTicketSchema.parse({ title: "  padded  " });
+    const parsed = createTaskSchema.parse({ title: "  padded  " });
     expect(parsed.title).toBe("padded");
     expect(
-      createTicketSchema.safeParse({ title: "a".repeat(201) }).success,
+      createTaskSchema.safeParse({ title: "a".repeat(201) }).success,
     ).toBe(false);
   });
 });
 
-describe("updateTicketSchema", () => {
+describe("updateTaskSchema", () => {
   it("requires expectedVersion", () => {
-    expect(updateTicketSchema.safeParse({ title: "new" }).success).toBe(false);
+    expect(updateTaskSchema.safeParse({ title: "new" }).success).toBe(false);
   });
 
   it("requires expectedVersion to be a positive integer", () => {
     expect(
-      updateTicketSchema.safeParse({ title: "x", expectedVersion: 0 }).success,
+      updateTaskSchema.safeParse({ title: "x", expectedVersion: 0 }).success,
     ).toBe(false);
     expect(
-      updateTicketSchema.safeParse({ title: "x", expectedVersion: -1 }).success,
+      updateTaskSchema.safeParse({ title: "x", expectedVersion: -1 }).success,
     ).toBe(false);
   });
 
   it("rejects an update with only expectedVersion and no fields", () => {
-    expect(updateTicketSchema.safeParse({ expectedVersion: 1 }).success).toBe(
+    expect(updateTaskSchema.safeParse({ expectedVersion: 1 }).success).toBe(
       false,
     );
   });
 
   it("accepts a valid partial update", () => {
-    const parsed = updateTicketSchema.parse({
+    const parsed = updateTaskSchema.parse({
       priority: "HIGH",
       expectedVersion: 3,
     });
@@ -67,7 +67,7 @@ describe("updateTicketSchema", () => {
   });
 
   it("allows clearing the assignee with null", () => {
-    const parsed = updateTicketSchema.parse({
+    const parsed = updateTaskSchema.parse({
       assigneeId: null,
       expectedVersion: 1,
     });
@@ -75,16 +75,16 @@ describe("updateTicketSchema", () => {
   });
 });
 
-describe("moveTicketSchema", () => {
+describe("moveTaskSchema", () => {
   it("requires status and expectedVersion", () => {
-    expect(moveTicketSchema.safeParse({ status: "DONE" }).success).toBe(false);
-    expect(moveTicketSchema.safeParse({ expectedVersion: 1 }).success).toBe(
+    expect(moveTaskSchema.safeParse({ status: "DONE" }).success).toBe(false);
+    expect(moveTaskSchema.safeParse({ expectedVersion: 1 }).success).toBe(
       false,
     );
   });
 
   it("accepts an optional position", () => {
-    const parsed = moveTicketSchema.parse({
+    const parsed = moveTaskSchema.parse({
       status: "REVIEW",
       expectedVersion: 2,
       position: 1500,

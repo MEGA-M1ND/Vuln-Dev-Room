@@ -15,17 +15,35 @@ import type { RunInterventionDTO } from "@/lib/agent/types";
  * not executing (see `cancelRun`).
  */
 
-/** Statuses in which a run is still occupying the ticket's active slot. */
+/**
+ * Statuses in which a run is still occupying the task's active slot.
+ *
+ * The pivot's new states are all non-terminal, so they all hold the slot: a
+ * task waiting on a human answer, blocked on a dependency, or sitting in
+ * review is still *this run's* task, and starting a second run against it
+ * would race the first. Only MERGED/ABANDONED release it (see below).
+ */
 export const ACTIVE_RUN_STATUSES: AgentRunStatus[] = [
   "QUEUED",
   "RUNNING",
   "AWAITING_APPROVAL",
+  "WAITING_FOR_INPUT",
+  "BLOCKED",
+  "REVIEW_READY",
 ];
 
+/**
+ * Terminal statuses: the run is finished and its outcome must never be
+ * overwritten. MERGED and ABANDONED are outcomes reported by a human or by
+ * GitHub, and are terminal in the same way SUCCEEDED is — distinct from
+ * FAILED, which means the run itself broke.
+ */
 export const TERMINAL_RUN_STATUSES: AgentRunStatus[] = [
   "SUCCEEDED",
   "FAILED",
   "CANCELLED",
+  "MERGED",
+  "ABANDONED",
 ];
 
 export function isTerminal(status: AgentRunStatus): boolean {
@@ -134,8 +152,8 @@ export async function requestCancel(
               errorCode: "CANCELLED_BY_USER",
               errorSummary: "Cancelled by a room member before any file was written.",
               finishedAt: new Date(),
-              // Release the ticket's single-active-run slot exactly once.
-              activeTicketId: null,
+              // Release the task's single-active-run slot exactly once.
+              activeTaskId: null,
               runVersion: { increment: 1 },
             }
           : {}),

@@ -5,23 +5,23 @@ import * as React from "react";
 import { useBoard } from "@/components/dev-room/board-context";
 import { RoomHeader } from "@/components/dev-room/room-header";
 import { KanbanBoard } from "@/components/dev-room/kanban-board";
-import { TicketDetails } from "@/components/dev-room/ticket-details";
+import { AgentTaskDetails } from "@/components/dev-room/task-details";
 import { RoomRoster } from "@/components/dev-room/room-roster";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
  * Three-zone desktop layout with responsive drawers:
- *  - Desktop (xl): board | ticket details | roster shown side by side.
+ *  - Desktop (xl): board | task details | roster shown side by side.
  *  - Tablet (lg-): board full width; details and roster open as slide-over
  *    drawers via header/close controls.
  */
 export function DevRoomLayout({ realtimeEnabled }: { realtimeEnabled: boolean }) {
-  const { selectedTicketId, selectTicket } = useBoard();
+  const { selectedTaskId, selectTask } = useBoard();
   const [rosterOpen, setRosterOpen] = React.useState(false);
 
-  // On smaller screens, selecting a ticket opens the details drawer.
-  const detailsOpen = selectedTicketId !== null;
+  // On smaller screens, selecting a task opens the details drawer.
+  const detailsOpen = selectedTaskId !== null;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
@@ -36,15 +36,15 @@ export function DevRoomLayout({ realtimeEnabled }: { realtimeEnabled: boolean })
           <KanbanBoard />
         </main>
 
-        {/* CENTER — ticket details (inline on xl, drawer below) */}
+        {/* CENTER — task details (inline on xl, drawer below) */}
         <SidePanel
           side="center"
           open={detailsOpen}
-          onClose={() => selectTicket(null)}
-          label="Ticket details"
+          onClose={() => selectTask(null)}
+          label="AgentTask details"
           inlineClassName="hidden xl:flex xl:w-[24rem] xl:border-l"
         >
-          <TicketDetails realtimeEnabled={realtimeEnabled} />
+          <AgentTaskDetails realtimeEnabled={realtimeEnabled} />
         </SidePanel>
 
         {/* RIGHT — roster (inline on xl, drawer below) */}

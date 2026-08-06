@@ -8,13 +8,13 @@ import { handleRouteError } from "@/lib/api/errors";
 import { prisma } from "@/lib/db/client";
 import { updateRoomSchema } from "@/lib/validation/schemas";
 import { listRoomMembers } from "@/lib/rooms/service";
-import { listRoomTickets } from "@/lib/tickets/service";
+import { listRoomTasks } from "@/lib/tasks/service";
 import { broadcastRoomEvent } from "@/lib/liveblocks/server";
 import type { BoardDTO, RoomDTO } from "@/lib/types";
 
 type Params = { params: Promise<{ roomId: string }> };
 
-// GET /api/rooms/[roomId] — full authoritative board (room + members + tickets).
+// GET /api/rooms/[roomId] — full authoritative board (room + members + tasks).
 export async function GET(_req: NextRequest, { params }: Params) {
   try {
     const { roomId } = await params;
@@ -23,9 +23,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
     const room = await prisma.room.findUniqueOrThrow({
       where: { id: roomId },
     });
-    const [members, tickets] = await Promise.all([
+    const [members, tasks] = await Promise.all([
       listRoomMembers(roomId),
-      listRoomTickets(roomId),
+      listRoomTasks(roomId),
     ]);
 
     const roomDTO: RoomDTO = {
@@ -40,7 +40,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       role: ctx.role,
     };
 
-    const board: BoardDTO = { room: roomDTO, members, tickets };
+    const board: BoardDTO = { room: roomDTO, members, tasks };
     return NextResponse.json(board);
   } catch (error) {
     return handleRouteError(error);

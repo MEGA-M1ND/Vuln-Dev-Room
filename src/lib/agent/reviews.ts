@@ -7,19 +7,19 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import { ApiError } from "@/lib/api/errors";
 import { runInclude, serializeRun } from "@/lib/agent/runs";
+import { ACTIVE_RUN_STATUSES } from "@/lib/agent/interventions";
 import type { RunDTO } from "@/lib/agent/types";
 import { startReviewAgentRun } from "@/lib/agent/client";
 
-const ACTIVE_STATUSES = ["QUEUED", "RUNNING", "AWAITING_APPROVAL"] as const;
 
 /**
  * Reviewer-agent (roadmap Phase 5): start a run that reviews another,
  * already-successful run's plan/diff/tests.
  *
- * Unlike a fork, a review run reuses the source's OWN ticket rather than
+ * Unlike a fork, a review run reuses the source's OWN task rather than
  * cloning one: it never touches the repository or sandbox, so there is
  * nothing to diverge, and by the time a run is reviewable (SUCCEEDED) the
- * ticket's single-active-run slot is already free for the review to take.
+ * task's single-active-run slot is already free for the review to take.
  */
 export async function requestReview(
   sourceRunId: string,
@@ -40,13 +40,13 @@ export async function requestReview(
   try {
     created = await prisma.$transaction(async (tx) => {
       const active = await tx.agentRun.findFirst({
-        where: { ticketId: source.ticketId, status: { in: [...ACTIVE_STATUSES] } },
+        where: { taskId: source.taskId, status: { in: ACTIVE_RUN_STATUSES } },
         select: { id: true },
       });
       if (active) {
         throw new ApiError(
           "RUN_ALREADY_ACTIVE",
-          "An agent run is already active for this ticket.",
+          "An agent run is already active for this task.",
           { runId: active.id },
         );
       }
@@ -54,7 +54,7 @@ export async function requestReview(
       const run = await tx.agentRun.create({
         data: {
           roomId: source.roomId,
-          ticketId: source.ticketId,
+          taskId: source.taskId,
           requestedById: userId,
           // The reviewer's requester owns the review run until handed off.
           ownerUserId: userId,
@@ -63,7 +63,7 @@ export async function requestReview(
           graphThreadId,
           targetRepositoryKey: source.targetRepositoryKey,
           runVersion: 1,
-          activeTicketId: source.ticketId,
+          activeTaskId: source.taskId,
           reviewedRunId: source.id,
         },
         include: runInclude,
@@ -83,21 +83,21 @@ export async function requestReview(
       return run;
     });
   } catch (err) {
-    // A concurrent creator won the activeTicketId unique constraint.
+    // A concurrent creator won the activeTaskId unique constraint.
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
       throw new ApiError(
         "RUN_ALREADY_ACTIVE",
-        "An agent run is already active for this ticket.",
+        "An agent run is already active for this task.",
       );
     }
     throw err;
   }
 
   // Ask the runtime to review in the background; mark the run FAILED if it
-  // can't even be reached, so it doesn't wedge the ticket's active-run slot.
+  // can't even be reached, so it doesn't wedge the task's active-run slot.
   try {
     await startReviewAgentRun(created.id, source.id);
   } catch (err) {
@@ -108,7 +108,7 @@ export async function requestReview(
         errorCode: "RUNTIME_UNAVAILABLE",
         errorSummary: "The agent runtime could not be reached.",
         finishedAt: new Date(),
-        activeTicketId: null,
+        activeTaskId: null,
         runVersion: { increment: 1 },
       },
     });

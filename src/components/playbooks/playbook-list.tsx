@@ -117,7 +117,7 @@ export function PlaybookList({
         <div className="rounded-xl border border-dashed border-border p-10 text-center">
           <h2 className="text-lg font-medium">No playbooks yet</h2>
           <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
-            When an agent run succeeds, save it as a playbook from the ticket&apos;s
+            When an agent run succeeds, save it as a playbook from the task&apos;s
             agent panel. Your team can then reuse that approach on similar work.
           </p>
         </div>

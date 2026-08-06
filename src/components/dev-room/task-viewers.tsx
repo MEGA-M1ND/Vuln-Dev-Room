@@ -4,11 +4,11 @@ import { usePresence } from "@/components/dev-room/presence-context";
 import { Avatar } from "@/components/ui/avatar";
 
 /**
- * Shows which other users are currently viewing a given ticket (from presence).
+ * Shows which other users are currently viewing a given task (from presence).
  */
-export function TicketViewers({ ticketId }: { ticketId: string }) {
+export function AgentTaskViewers({ taskId }: { taskId: string }) {
   const { viewersOf } = usePresence();
-  const viewers = viewersOf(ticketId);
+  const viewers = viewersOf(taskId);
 
   if (viewers.length === 0) return null;
 
