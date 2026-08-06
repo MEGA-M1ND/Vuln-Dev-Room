@@ -74,6 +74,11 @@ export function RoomHeader({
         )}
         <ConnectRepository />
         <MemberManager />
+        <Link href={`/rooms/${room.id}/control-room`}>
+          <Button variant="outline" size="sm">
+            Control room
+          </Button>
+        </Link>
         <Link href={`/rooms/${room.id}/playbooks`}>
           <Button variant="outline" size="sm">
             Playbooks

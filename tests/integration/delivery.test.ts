@@ -10,6 +10,7 @@ import {
 } from "@/lib/github/pull-requests";
 import { readReviewedFiles } from "@/lib/github/diff";
 import { can } from "@/lib/permissions";
+import { isGitHubConfigured } from "@/env";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const suffix = `pr-${Date.now()}`;
@@ -119,8 +120,11 @@ describe.skipIf(!hasDb)("draft PR delivery (integration)", () => {
   });
 
   it("is refused when GitHub is not configured", async () => {
-    // The suite runs without DEVROOM_GITHUB_ENABLED, which is the default and
-    // the state every existing demo runs in.
+    // Holds either way, and deliberately so: with GitHub off the server-level
+    // check refuses, and with GitHub on this room still has no active
+    // RepositoryConnection, which refuses with the same code. Delivery is
+    // never possible by default — it takes both a configured server and a
+    // repository someone explicitly connected.
     const run = await succeededRunWithDiff();
     await expect(
       createDraftPrForRun({ runId: run.id, userId: ownerId }),
@@ -141,10 +145,24 @@ describe.skipIf(!hasDb)("draft PR delivery (integration)", () => {
       where: { id: run.id },
       data: { status: "RUNNING" },
     });
+    // The invariant that must hold in EVERY environment: a run that has not
+    // succeeded never ships, and nothing is persisted when it is refused.
     await expect(
       createDraftPrForRun({ runId: run.id, userId: ownerId }),
-    ).rejects.toMatchObject({ code: "INTEGRATION_NOT_CONFIGURED" });
-    // (Config is checked first; the status guard is asserted directly below.)
+    ).rejects.toThrow();
+    expect(await getRunPullRequest(run.id)).toBeNull();
+
+    // Which guard fires depends on the server's own configuration, and this
+    // suite must not assume either. With GitHub off, the config check runs
+    // first; with GitHub on, we reach the status check — the one this test is
+    // actually named for. Asserting the code unconditionally made the suite
+    // pass only on machines with no GitHub credentials in `.env`.
+    const expectedCode = isGitHubConfigured
+      ? "BAD_REQUEST"
+      : "INTEGRATION_NOT_CONFIGURED";
+    await expect(
+      createDraftPrForRun({ runId: run.id, userId: ownerId }),
+    ).rejects.toMatchObject({ code: expectedCode });
   });
 
   it("enforces at most one pull request link per run", async () => {

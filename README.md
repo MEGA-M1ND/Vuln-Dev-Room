@@ -327,6 +327,27 @@ Machine-readable schema: `src/contracts/agent-events.ts`.
 
 ---
 
+## 8c. The control room
+
+`/rooms/[roomId]/control-room` answers one question across every agent working
+in the repository — built-in or external: **what is in flight, and what is
+waiting on a person?**
+
+- A **work queue** ordered by what needs a human first, not by recency, and
+  filterable by status, owner, agent, repository and risk. Tasks nothing has
+  picked up are included, because an untouched task is a gap worth seeing.
+- **Potential conflicts & risks** — the transparent heuristics described in
+  [`docs/risk-signals.md`](docs/risk-signals.md).
+- **Recent outcomes**, including the runs that did not land, **recent pull
+  requests**, and the room's shared **activity timeline**.
+
+It reports work, never people: no per-developer throughput, no ranking, no
+scoring. An owner is shown so you know who to ask.
+
+Full reference: **[`docs/control-room.md`](docs/control-room.md)**.
+
+---
+
 ## 9. Environment variables
 
 | Variable | Required | Purpose |

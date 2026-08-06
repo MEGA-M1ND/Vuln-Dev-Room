@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/db/client";
+import { ACTIVE_RUN_STATUSES } from "@/lib/agent/interventions";
 
 /**
  * Lean-team metrics.
@@ -25,9 +26,17 @@ export type RoomInsights = {
     succeeded: number;
     failed: number;
     cancelled: number;
+    /** The linked pull request was merged — a succeeded run that also landed. */
+    merged: number;
+    /** Dropped without merging. Distinct from failed: nothing broke. */
+    abandoned: number;
     inProgress: number;
   };
-  /** Share of finished runs that succeeded. Null when nothing finished yet. */
+  /**
+   * Share of finished runs that landed successfully. MERGED counts as a
+   * success (the run finished *and* shipped); ABANDONED does not.
+   * Null when nothing has finished yet.
+   */
   successRate: number | null;
   /** Share of runs reaching the gate that were approved rather than rejected. */
   approvalRate: number | null;
@@ -107,9 +116,14 @@ export async function getRoomInsights(
   const succeeded = countOf("SUCCEEDED");
   const failed = countOf("FAILED");
   const cancelled = countOf("CANCELLED");
-  const inProgress = countOf("QUEUED") + countOf("RUNNING") + countOf("AWAITING_APPROVAL");
-  const started = succeeded + failed + cancelled + inProgress;
-  const finished = succeeded + failed + cancelled;
+  // Derived from the shared constant rather than a literal list, so a run in a
+  // state added later (WAITING_FOR_INPUT, BLOCKED, REVIEW_READY…) is not
+  // silently dropped from "started" and the totals stay honest.
+  const inProgress = ACTIVE_RUN_STATUSES.reduce((sum, s) => sum + countOf(s), 0);
+  const merged = countOf("MERGED");
+  const abandoned = countOf("ABANDONED");
+  const started = succeeded + failed + cancelled + merged + abandoned + inProgress;
+  const finished = succeeded + failed + cancelled + merged + abandoned;
 
   // Approval + intervention rates come from durable events/interventions.
   const [runIdsRows, approvedRuns, rejectedRuns, redirectedRuns, interveningRuns, testEvents] =
@@ -174,13 +188,13 @@ export async function getRoomInsights(
   const weeks =
     window === "7d" ? 1 : window === "30d" ? 30 / 7 : null;
   const throughputPerWeek =
-    weeks !== null ? Math.round((succeeded / weeks) * 10) / 10 : null;
+    weeks !== null ? Math.round(((succeeded + merged) / weeks) * 10) / 10 : null;
 
   return {
     window,
     since: since?.toISOString() ?? null,
-    runs: { started, succeeded, failed, cancelled, inProgress },
-    successRate: ratio(succeeded, finished),
+    runs: { started, succeeded, failed, cancelled, merged, abandoned, inProgress },
+    successRate: ratio(succeeded + merged, finished),
     approvalRate: ratio(approvedRuns.length, decided),
     redirectRate: ratio(redirectedRuns.length, totalRuns),
     interventionRate: ratio(interveningRuns.length, totalRuns),
