@@ -162,6 +162,7 @@ model User {
   interventions    RunIntervention[] @relation("InterventionAuthor")
   createdPlaybooks Playbook[]       @relation("PlaybookCreatedBy")
   githubConnections GitHubConnection[] @relation("GitHubConnectionCreatedBy")
+  riskDismissals    RiskSignalDismissal[] @relation("RiskDismissedBy")
 
   @@index([email])
 }
@@ -332,6 +333,7 @@ model AgentRun {
   events        RunEvent[]
   interventions RunIntervention[]
   pullRequest   PullRequestLink?
+  riskDismissals RiskSignalDismissal[]
   savedPlaybook Playbook?         @relation("PlaybookSourceRun")
 
   @@index([taskId, createdAt])
@@ -456,6 +458,10 @@ model RepositoryConnection {
   defaultBranch String   @default("main")
   connectionId  String?
   isActive      Boolean  @default(true)
+  // Glob-ish path prefixes a team considers high-blast-radius (e.g.
+  // "infra/", "src/auth/"). A task touching one raises a critical-path
+  // signal. Team-configured on purpose — we never guess what is critical.
+  criticalPaths String[] @default([])
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -468,6 +474,29 @@ model RepositoryConnection {
 }
 
 /// The draft pull request opened from a successful run. One per run.
+/// A human dismissal of a computed risk signal.
+///
+/// Signals themselves are COMPUTED on read, never stored: a stored signal
+/// goes stale the moment the underlying facts change, and would need a
+/// background job to stay honest. Only the dismissal is durable, keyed by the
+/// signal's deterministic key, and a reason is mandatory — dismissing is a
+/// recorded decision, not a delete.
+model RiskSignalDismissal {
+  id            String   @id @default(cuid())
+  runId         String
+  /// Deterministic identity of the dismissed signal (see lib/agent/signals.ts).
+  signalKey     String
+  dismissedById String
+  reason        String
+  createdAt     DateTime @default(now())
+
+  run         AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  dismissedBy User     @relation("RiskDismissedBy", fields: [dismissedById], references: [id], onDelete: Cascade)
+
+  @@unique([runId, signalKey])
+  @@index([runId])
+}
+
 model PullRequestLink {
   id         String   @id @default(cuid())
   runId      String   @unique
