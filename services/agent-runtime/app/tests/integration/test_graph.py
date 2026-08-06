@@ -41,8 +41,8 @@ def test_backend_agent_graph_end_to_end(docker_required, demo_repo):
         graph.invoke(
             {
                 "run_id": "test-run",
-                "ticket_title": "Implement token bucket",
-                "ticket_description": "",
+                "task_title": "Implement token bucket",
+                "task_description": "",
                 "base_revision": prepared.base_revision,
             },
             config=cfg,
@@ -102,7 +102,7 @@ def test_diff_artifact_records_reviewed_file_contents(docker_required, demo_repo
         graph = _build_graph(ctx, MemorySaver())
         cfg = {"configurable": {"thread_id": "diff-json-1"}}
         graph.invoke(
-            {"run_id": "r", "ticket_title": "Implement", "ticket_description": ""},
+            {"run_id": "r", "task_title": "Implement", "task_description": ""},
             config=cfg,
         )
         graph.invoke(None, config=cfg)  # approve the gate

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { prisma } from "@/lib/db/client";
 import { ApiError } from "@/lib/api/errors";
-import { nextPositionAfter } from "@/lib/tickets/ordering";
+import { nextPositionAfter } from "@/lib/tasks/ordering";
 import { runInclude, serializeRun } from "@/lib/agent/runs";
 import type { RunDTO } from "@/lib/agent/types";
 import { forkAgentRun } from "@/lib/agent/client";
@@ -12,8 +12,8 @@ import { forkAgentRun } from "@/lib/agent/client";
 /**
  * Fork (roadmap Phase 4): branch a run parked at the plan-approval gate.
  *
- * A fork clones the source run's ticket rather than sharing it, so the DB-level
- * "one active run per ticket" `activeTicketId` unique constraint never needs to
+ * A fork clones the source run's task rather than sharing it, so the DB-level
+ * "one active run per task" `activeTaskId` unique constraint never needs to
  * be relaxed for this feature. The runtime then copies the source's checkpointed
  * LangGraph thread onto the new run, reproducing the exact paused state so the
  * fork starts AWAITING_APPROVAL with the same proposed plan — free to be
@@ -41,25 +41,25 @@ export async function forkRun(
   const graphThreadId = `thread_${randomUUID()}`;
 
   const created = await prisma.$transaction(async (tx) => {
-    const sourceTicket = await tx.ticket.findUnique({
-      where: { id: source.ticketId },
+    const sourceTask = await tx.agentTask.findUnique({
+      where: { id: source.taskId },
     });
-    if (!sourceTicket) throw new ApiError("NOT_FOUND", "Ticket not found.");
+    if (!sourceTask) throw new ApiError("NOT_FOUND", "AgentTask not found.");
 
-    const last = await tx.ticket.findFirst({
-      where: { roomId: source.roomId, status: sourceTicket.status },
+    const last = await tx.agentTask.findFirst({
+      where: { roomId: source.roomId, status: sourceTask.status },
       orderBy: { position: "desc" },
       select: { position: true },
     });
     const position = nextPositionAfter(last?.position ?? null);
 
-    const ticket = await tx.ticket.create({
+    const task = await tx.agentTask.create({
       data: {
         roomId: source.roomId,
-        title: `${sourceTicket.title} (fork)`,
-        description: sourceTicket.description,
-        status: sourceTicket.status,
-        priority: sourceTicket.priority,
+        title: `${sourceTask.title} (fork)`,
+        description: sourceTask.description,
+        status: sourceTask.status,
+        priority: sourceTask.priority,
         position,
         createdById: userId,
         version: 1,
@@ -69,7 +69,7 @@ export async function forkRun(
     const run = await tx.agentRun.create({
       data: {
         roomId: source.roomId,
-        ticketId: ticket.id,
+        taskId: task.id,
         requestedById: userId,
         // The person who forked owns the new run until explicitly handed off.
         ownerUserId: userId,
@@ -80,7 +80,7 @@ export async function forkRun(
         targetRepositoryKey: source.targetRepositoryKey,
         baseRevision: source.baseRevision,
         runVersion: 1,
-        activeTicketId: ticket.id,
+        activeTaskId: task.id,
         parentRunId: source.id,
         forkedAtEvent: lastEvent?.id ?? null,
       },
@@ -111,7 +111,7 @@ export async function forkRun(
     await forkAgentRun(created.id, source.id);
   } catch (err) {
     // The run row exists (QUEUED); mark it failed so it doesn't wedge its own
-    // ticket's single-active-run slot, mirroring createAgentRun's handling of
+    // task's single-active-run slot, mirroring createAgentRun's handling of
     // an unreachable runtime.
     await prisma.agentRun.update({
       where: { id: created.id },
@@ -120,7 +120,7 @@ export async function forkRun(
         errorCode: "RUNTIME_UNAVAILABLE",
         errorSummary: "The agent runtime could not be reached.",
         finishedAt: new Date(),
-        activeTicketId: null,
+        activeTaskId: null,
         runVersion: { increment: 1 },
       },
     });

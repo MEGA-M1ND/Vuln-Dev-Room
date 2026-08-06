@@ -8,7 +8,7 @@ from app.models.base import PlanRequest, ReviewRequest, ToolCall
 
 SYSTEM = (
     "You are backend-agent, a careful backend coding assistant. You are given a "
-    "ticket and excerpts from a repository. Propose a minimal change as STRICT "
+    "task and excerpts from a repository. Propose a minimal change as STRICT "
     "JSON with keys: plan (string), summary (string), edits (array of {path, "
     "new_content, rationale}). Only edit files that were provided to you. Return "
     "the FULL new content for each edited file. Respond with JSON only."
@@ -26,7 +26,7 @@ EXPLORE_SYSTEM = (
     '"done", "path": string (read_file only), "query": string '
     "(search_repository only)}. Choose \"done\" as soon as you have enough "
     "context — usually after reading the handful of files most relevant to the "
-    "ticket — to propose a minimal, correct change. Respond with JSON only."
+    "task — to propose a minimal, correct change. Respond with JSON only."
 )
 
 
@@ -34,7 +34,7 @@ EXPLORE_SYSTEM = (
 # test result — it never touches the sandbox or repository itself.
 REVIEW_SYSTEM = (
     "You are reviewer-agent, reviewing a completed change made by another "
-    "agent. You are given the ticket, the plan that was proposed, the diff "
+    "agent. You are given the task, the plan that was proposed, the diff "
     "that was applied, and the captured test result. Respond with STRICT "
     'JSON: {"summary": string, "verdict": "approve" | "request_changes" | '
     '"comment", "comments": array of {"path": string, "severity": "info" | '
@@ -47,7 +47,7 @@ REVIEW_SYSTEM = (
 
 def render_review_prompt(request: ReviewRequest) -> str:
     return (
-        f"Proposed plan (states the ticket it addresses):\n{request.plan_text}\n\n"
+        f"Proposed plan (states the task it addresses):\n{request.plan_text}\n\n"
         f"Applied diff:\n{request.diff_text}\n\n"
         f"Test result (passed={request.test_passed}):\n{request.test_output}\n"
     )
@@ -57,8 +57,8 @@ def render_exploration_prompt(
     request: PlanRequest, history: list[tuple[ToolCall, str]]
 ) -> str:
     lines = [
-        f"Ticket title: {request.title}",
-        f"Ticket description: {request.description}",
+        f"AgentTask title: {request.title}",
+        f"AgentTask description: {request.description}",
         f"Language: {request.language}",
         "",
         f"Repository files (tree):\n{json.dumps(request.repo_tree, indent=2)}",

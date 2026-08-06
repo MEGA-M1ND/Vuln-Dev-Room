@@ -40,10 +40,10 @@ class PlanResult:
 class ReviewRequest:
     """What reviewer-agent sees of the run it is reviewing (roadmap Phase 5).
 
-    No ticket title/description: AgentRun rows don't persist them (only the
-    Ticket does, and the ticket context is already embedded in `plan_text` —
+    No task title/description: AgentRun rows don't persist them (only the
+    AgentTask does, and the task context is already embedded in `plan_text` —
     every Model.propose_change() implementation opens its plan with the
-    ticket it addressed), so reviewer-agent works from what the source run
+    task it addressed), so reviewer-agent works from what the source run
     itself durably captured rather than a second round trip to fetch it.
     """
 

@@ -20,9 +20,9 @@ def _settings(*, real_repos_enabled: bool) -> Settings:
         DEVROOM_REAL_REPOS_ENABLED=real_repos_enabled,
         DEVROOM_REPOSITORIES_JSON=json.dumps(
             {
-                "agentguard-demo": {
-                    "display_name": "AgentGuard demo",
-                    "source_path": "/srv/agentguard-demo",
+                "demo-service": {
+                    "display_name": "demo service",
+                    "source_path": "/srv/demo-service",
                 }
             }
         ),
@@ -35,9 +35,9 @@ def test_flag_off_uses_static_registry_even_with_a_connection(monkeypatch):
         "get_active_repository_connection",
         lambda room_id: pytest.fail("must not be queried when the flag is off"),
     )
-    repo = _resolve_repo({"roomId": "room-1"}, "agentguard-demo", _settings(real_repos_enabled=False))
+    repo = _resolve_repo({"roomId": "room-1"}, "demo-service", _settings(real_repos_enabled=False))
     assert repo is not None
-    assert repo.source_path == "/srv/agentguard-demo"
+    assert repo.source_path == "/srv/demo-service"
     assert repo.git_url is None
 
 
@@ -45,9 +45,9 @@ def test_flag_on_no_connection_falls_back_to_static_registry(monkeypatch):
     monkeypatch.setattr(
         repositories_db, "get_active_repository_connection", lambda room_id: None
     )
-    repo = _resolve_repo({"roomId": "room-1"}, "agentguard-demo", _settings(real_repos_enabled=True))
+    repo = _resolve_repo({"roomId": "room-1"}, "demo-service", _settings(real_repos_enabled=True))
     assert repo is not None
-    assert repo.source_path == "/srv/agentguard-demo"
+    assert repo.source_path == "/srv/demo-service"
 
 
 def test_flag_on_with_connection_ignores_the_static_key(monkeypatch):
@@ -60,7 +60,7 @@ def test_flag_on_with_connection_ignores_the_static_key(monkeypatch):
             owner="octocat", repo="hello-world", default_branch="main"
         ),
     )
-    repo = _resolve_repo({"roomId": "room-1"}, "agentguard-demo", _settings(real_repos_enabled=True))
+    repo = _resolve_repo({"roomId": "room-1"}, "demo-service", _settings(real_repos_enabled=True))
     assert repo is not None
     assert repo.source_path is None
     assert repo.git_url == "https://github.com/octocat/hello-world.git"
@@ -78,4 +78,4 @@ def test_invalid_connection_owner_raises_instead_of_building_a_bad_url(monkeypat
         ),
     )
     with pytest.raises(RepositorySourceError):
-        _resolve_repo({"roomId": "room-1"}, "agentguard-demo", _settings(real_repos_enabled=True))
+        _resolve_repo({"roomId": "room-1"}, "demo-service", _settings(real_repos_enabled=True))

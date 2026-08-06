@@ -8,7 +8,7 @@ reused when constructing a plan artifact.
 
 BACKEND_AGENT_ROLE = (
     "backend-agent inspects a configured repository snapshot inside an isolated "
-    "sandbox, plans a minimal change to satisfy a ticket, edits only allow-listed "
+    "sandbox, plans a minimal change to satisfy a task, edits only allow-listed "
     "files, and runs the project's own test suite to verify. It never accesses the "
     "network, the host filesystem, or any credentials."
 )

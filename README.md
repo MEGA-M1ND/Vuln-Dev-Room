@@ -1,15 +1,23 @@
-# Dev Room
+# Agent Dev Room
 
 [![CI](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml/badge.svg)](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-205%2F205-brightgreen)](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml)
 
-**The shared control room for AI coding agents.** Your team watches, steers,
-approves, hands off and ships agent work together — instead of each engineer
-running an agent alone in a private terminal.
+**Turn private AI coding sessions into work your engineering team can review,
+steer, hand off, and ship.** Your team watches, steers, approves, hands off and
+ships agent work together — instead of each engineer running an agent alone in
+a private terminal.
 
 Built for lean teams (3–10 engineers) with a GitHub-native workflow. Not a Jira
-replacement, not an agent swarm dashboard, and never an autonomous
-merge-to-main system.
+replacement, not an agent swarm dashboard, not a surveillance or
+productivity-scoring tool, and never an autonomous merge-to-main system.
+
+> **Note on the repository name.** The GitHub slug is still `Vuln-Dev-Room`, a
+> vestige of an earlier working title. There is no vulnerability-scanning or
+> remediation functionality in this codebase — see
+> [`docs/agent-dev-room-pivot-plan.md`](docs/agent-dev-room-pivot-plan.md) §0 for
+> the audit. Renaming the repository is a GitHub settings change the owner must
+> make; nothing in the code depends on the slug.
 
 ## How we guarantee nothing is written without approval
 

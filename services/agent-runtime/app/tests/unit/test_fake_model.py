@@ -65,7 +65,7 @@ def test_fake_model_no_marker_makes_no_edits():
 def test_fake_model_review_approves_a_passing_diff():
     result = FakeModel().review(
         ReviewRequest(
-            plan_text="Address ticket: t\n",
+            plan_text="Address task: t\n",
             diff_text=_DIFF,
             test_output="1 passed",
             test_passed=True,
@@ -79,7 +79,7 @@ def test_fake_model_review_approves_a_passing_diff():
 def test_fake_model_review_requests_changes_on_a_failing_test_run():
     result = FakeModel().review(
         ReviewRequest(
-            plan_text="Address ticket: t\n",
+            plan_text="Address task: t\n",
             diff_text=_DIFF,
             test_output="1 failed",
             test_passed=False,

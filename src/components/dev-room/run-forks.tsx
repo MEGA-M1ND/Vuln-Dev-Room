@@ -20,12 +20,12 @@ const STATUS_STYLES: Record<string, string> = {
 
 /**
  * Fork (roadmap Phase 4) genealogy: a simple list, not a canvas — a "forked
- * from" link up to the parent run's ticket, and a list of runs forked from
- * this one. Each fork lives on its own ticket, so navigating jumps the room's
- * ticket selection rather than swapping the run in place.
+ * from" link up to the parent run's task, and a list of runs forked from
+ * this one. Each fork lives on its own task, so navigating jumps the room's
+ * task selection rather than swapping the run in place.
  */
 export function RunForkLineage({ run }: { run: RunDTO }) {
-  const { selectTicket } = useBoard();
+  const { selectTask } = useBoard();
   const [parent, setParent] = React.useState<RunDTO | null>(null);
   const [forks, setForks] = React.useState<RunDTO[]>([]);
 
@@ -68,7 +68,7 @@ export function RunForkLineage({ run }: { run: RunDTO }) {
               size="sm"
               variant="ghost"
               className="h-auto px-1 py-0 text-xs"
-              onClick={() => selectTicket(parent.ticketId)}
+              onClick={() => selectTask(parent.taskId)}
             >
               this run&rsquo;s parent
             </Button>
@@ -89,7 +89,7 @@ export function RunForkLineage({ run }: { run: RunDTO }) {
                   size="sm"
                   variant="ghost"
                   className="h-auto px-1 py-0 text-xs"
-                  onClick={() => selectTicket(f.ticketId)}
+                  onClick={() => selectTask(f.taskId)}
                 >
                   View fork
                 </Button>

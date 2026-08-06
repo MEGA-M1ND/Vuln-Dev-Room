@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 
 import { prisma } from "@/lib/db/client";
-import { createAgentRun, latestRunForTicket } from "@/lib/agent/runs";
+import { createAgentRun, latestRunForTask } from "@/lib/agent/runs";
 import { ApiError } from "@/lib/api/errors";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
@@ -10,7 +10,7 @@ const suffix = `run-it-${Date.now()}`;
 
 describe.skipIf(!hasDb)("agent run creation (integration)", () => {
   let roomId = "";
-  let ticketId = "";
+  let taskId = "";
   let userId = "";
 
   beforeAll(async () => {
@@ -27,10 +27,10 @@ describe.skipIf(!hasDb)("agent run creation (integration)", () => {
       },
     });
     roomId = room.id;
-    const ticket = await prisma.ticket.create({
-      data: { roomId, title: "Run ticket", createdById: user.id, position: 1000 },
+    const task = await prisma.agentTask.create({
+      data: { roomId, title: "Run task", createdById: user.id, position: 1000 },
     });
-    ticketId = ticket.id;
+    taskId = task.id;
   });
 
   afterAll(async () => {
@@ -42,9 +42,9 @@ describe.skipIf(!hasDb)("agent run creation (integration)", () => {
   it("creates a QUEUED run with an initial RUN_CREATED event", async () => {
     const run = await createAgentRun({
       roomId,
-      ticketId,
+      taskId,
       requestedById: userId,
-      targetRepositoryKey: "agentguard-demo",
+      targetRepositoryKey: "demo-service",
     });
     expect(run.status).toBe("QUEUED");
     expect(run.agentId).toBe("backend-agent");
@@ -55,50 +55,50 @@ describe.skipIf(!hasDb)("agent run creation (integration)", () => {
     expect(events[0]!.sequence).toBe(1);
   });
 
-  it("rejects a second active run for the same ticket", async () => {
+  it("rejects a second active run for the same task", async () => {
     // A run from the previous test is still active (QUEUED).
     await expect(
       createAgentRun({
         roomId,
-        ticketId,
+        taskId,
         requestedById: userId,
-        targetRepositoryKey: "agentguard-demo",
+        targetRepositoryKey: "demo-service",
       }),
     ).rejects.toMatchObject({ code: "RUN_ALREADY_ACTIVE" });
   });
 
   it("allows a new run once the previous run is terminal", async () => {
     const active = await prisma.agentRun.findFirst({
-      where: { ticketId, status: "QUEUED" },
+      where: { taskId, status: "QUEUED" },
     });
     expect(active).not.toBeNull();
     // Simulate the run finishing: terminal status releases the active lock.
     await prisma.agentRun.update({
       where: { id: active!.id },
-      data: { status: "SUCCEEDED", activeTicketId: null, finishedAt: new Date() },
+      data: { status: "SUCCEEDED", activeTaskId: null, finishedAt: new Date() },
     });
 
     const run = await createAgentRun({
       roomId,
-      ticketId,
+      taskId,
       requestedById: userId,
-      targetRepositoryKey: "agentguard-demo",
+      targetRepositoryKey: "demo-service",
     });
     expect(run.status).toBe("QUEUED");
 
-    const latest = await latestRunForTicket(ticketId);
+    const latest = await latestRunForTask(taskId);
     expect(latest?.id).toBe(run.id);
   });
 
   it("never exposes sandboxId in the run DTO", async () => {
-    const latest = await latestRunForTicket(ticketId);
+    const latest = await latestRunForTask(taskId);
     expect(latest).not.toBeNull();
     expect(Object.keys(latest as object)).not.toContain("sandboxId");
   });
 
   it("Stage 3: an AWAITING_APPROVAL run still blocks a new run", async () => {
     // Move the current run to the approval gate (still an active slot holder).
-    const current = await latestRunForTicket(ticketId);
+    const current = await latestRunForTask(taskId);
     await prisma.agentRun.update({
       where: { id: current!.id },
       data: { status: "AWAITING_APPROVAL" },
@@ -107,9 +107,9 @@ describe.skipIf(!hasDb)("agent run creation (integration)", () => {
     await expect(
       createAgentRun({
         roomId,
-        ticketId,
+        taskId,
         requestedById: userId,
-        targetRepositoryKey: "agentguard-demo",
+        targetRepositoryKey: "demo-service",
       }),
     ).rejects.toMatchObject({ code: "RUN_ALREADY_ACTIVE" });
   });

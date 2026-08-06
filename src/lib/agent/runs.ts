@@ -5,10 +5,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import { ApiError } from "@/lib/api/errors";
 import type { RunArtifactDTO, RunDTO, RunEventDTO } from "@/lib/agent/types";
-
-// A run occupies the ticket's single-active slot until it is terminal. Stage 3
-// adds AWAITING_APPROVAL, which is still active (a decision is pending).
-const ACTIVE_STATUSES = ["QUEUED", "RUNNING", "AWAITING_APPROVAL"] as const;
+// Single source of truth: this list previously existed as three separate
+// literal copies, which silently drifted apart the moment new statuses were
+// added. Import it instead of restating it.
+import { ACTIVE_RUN_STATUSES } from "@/lib/agent/interventions";
 
 type RunWithRequester = Prisma.AgentRunGetPayload<{
   include: {
@@ -26,7 +26,7 @@ type RunWithRequester = Prisma.AgentRunGetPayload<{
 function toRunDTO(run: RunWithRequester): RunDTO {
   return {
     id: run.id,
-    ticketId: run.ticketId,
+    taskId: run.taskId,
     roomId: run.roomId,
     agentId: run.agentId,
     status: run.status,
@@ -60,17 +60,17 @@ export const runInclude = {
 } satisfies Prisma.AgentRunInclude;
 
 /**
- * Create a run for a ticket, transactionally:
- *  - rejects a duplicate active run (QUEUED/RUNNING) for the ticket,
- *  - creates the AgentRun (holding the DB-level active lock via activeTicketId),
+ * Create a run for a task, transactionally:
+ *  - rejects a duplicate active run (QUEUED/RUNNING) for the task,
+ *  - creates the AgentRun (holding the DB-level active lock via activeTaskId),
  *  - records the initial RUN_CREATED event (sequence 1).
  *
- * The DB unique constraint on `activeTicketId` is the ultimate guard against a
+ * The DB unique constraint on `activeTaskId` is the ultimate guard against a
  * race; the explicit pre-check gives a clean error in the common case.
  */
 export async function createAgentRun(params: {
   roomId: string;
-  ticketId: string;
+  taskId: string;
   requestedById: string;
   targetRepositoryKey: string;
   agentId?: string;
@@ -83,13 +83,13 @@ export async function createAgentRun(params: {
   try {
     const run = await prisma.$transaction(async (tx) => {
       const active = await tx.agentRun.findFirst({
-        where: { ticketId: params.ticketId, status: { in: [...ACTIVE_STATUSES] } },
+        where: { taskId: params.taskId, status: { in: ACTIVE_RUN_STATUSES } },
         select: { id: true },
       });
       if (active) {
         throw new ApiError(
           "RUN_ALREADY_ACTIVE",
-          "An agent run is already active for this ticket.",
+          "An agent run is already active for this task.",
           { runId: active.id },
         );
       }
@@ -97,7 +97,7 @@ export async function createAgentRun(params: {
       const created = await tx.agentRun.create({
         data: {
           roomId: params.roomId,
-          ticketId: params.ticketId,
+          taskId: params.taskId,
           requestedById: params.requestedById,
           // The requester owns the run until it is explicitly handed off.
           ownerUserId: params.requestedById,
@@ -107,7 +107,7 @@ export async function createAgentRun(params: {
           graphThreadId,
           targetRepositoryKey: params.targetRepositoryKey,
           runVersion: 1,
-          activeTicketId: params.ticketId,
+          activeTaskId: params.taskId,
         },
         include: runInclude,
       });
@@ -128,14 +128,14 @@ export async function createAgentRun(params: {
 
     return toRunDTO(run);
   } catch (err) {
-    // A concurrent creator won the activeTicketId unique constraint.
+    // A concurrent creator won the activeTaskId unique constraint.
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
       throw new ApiError(
         "RUN_ALREADY_ACTIVE",
-        "An agent run is already active for this ticket.",
+        "An agent run is already active for this task.",
       );
     }
     throw err;
@@ -153,12 +153,12 @@ export function serializeRun(run: RunWithRequester): RunDTO {
   return toRunDTO(run);
 }
 
-/** The most recent run for a ticket, if any. */
-export async function latestRunForTicket(
-  ticketId: string,
+/** The most recent run for a task, if any. */
+export async function latestRunForTask(
+  taskId: string,
 ): Promise<RunDTO | null> {
   const run = await prisma.agentRun.findFirst({
-    where: { ticketId },
+    where: { taskId },
     orderBy: { createdAt: "desc" },
     include: runInclude,
   });

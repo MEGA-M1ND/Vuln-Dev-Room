@@ -280,7 +280,7 @@ export function StartWithPlaybook({
               id="pb-instructions"
               name="instructions"
               maxLength={2000}
-              placeholder="Anything unique about this ticket."
+              placeholder="Anything unique about this task."
             />
           </div>
 

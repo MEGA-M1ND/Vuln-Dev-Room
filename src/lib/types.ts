@@ -1,7 +1,7 @@
 import type {
   MembershipRole,
-  TicketPriority,
-  TicketStatus,
+  TaskPriority,
+  AgentTaskStatus,
 } from "@prisma/client";
 
 /**
@@ -38,16 +38,16 @@ export type RoomDTO = {
 
 export type RoomSummaryDTO = RoomDTO & {
   memberCount: number;
-  ticketCount: number;
+  taskCount: number;
 };
 
-export type TicketDTO = {
+export type AgentTaskDTO = {
   id: string;
   roomId: string;
   title: string;
   description: string | null;
-  status: TicketStatus;
-  priority: TicketPriority;
+  status: AgentTaskStatus;
+  priority: TaskPriority;
   assignee: UserDTO | null;
   position: number;
   version: number;
@@ -59,5 +59,5 @@ export type TicketDTO = {
 export type BoardDTO = {
   room: RoomDTO;
   members: MemberDTO[];
-  tickets: TicketDTO[];
+  tasks: AgentTaskDTO[];
 };

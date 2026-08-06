@@ -30,7 +30,7 @@ export type RunInterventionDTO = {
  */
 export type RunDTO = {
   id: string;
-  ticketId: string;
+  taskId: string;
   roomId: string;
   agentId: string;
   status: AgentRunStatus;

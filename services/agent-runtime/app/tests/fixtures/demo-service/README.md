@@ -1,4 +1,4 @@
-# AgentGuard demo repository
+# demo service repository
 
 A deterministic fixture repository for Dev Room Stage 2 agent runs. The
 `backend/rate_limiter.py` module contains a stubbed method marked with

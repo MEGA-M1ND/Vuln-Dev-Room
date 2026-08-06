@@ -10,11 +10,11 @@ import { Button } from "@/components/ui/button";
 const STEPS = [
   {
     title: "Create a task",
-    body: "Add a ticket describing what needs to change.",
+    body: "Add a task describing what needs to change.",
   },
   {
     title: "Start an agent",
-    body: "Run backend-agent on the ticket, or reuse a saved playbook.",
+    body: "Run backend-agent on the task, or reuse a saved playbook.",
   },
   {
     title: "Review the plan",
@@ -33,18 +33,18 @@ const STEPS = [
 /**
  * First-run guidance for an empty room.
  *
- * The sample ticket is only offered in demo mode: a real room never gets
+ * The sample task is only offered in demo mode: a real room never gets
  * seeded with fake data behind the user's back.
  */
 export function RoomOnboarding({ demoMode }: { demoMode: boolean }) {
   const { board, role, refetch } = useBoard();
   const [creating, setCreating] = React.useState(false);
-  const canCreate = can(role, "ticket:create");
+  const canCreate = can(role, "task:create");
 
   async function createSample() {
     setCreating(true);
     try {
-      await apiFetch(`/api/rooms/${board.room.id}/tickets`, {
+      await apiFetch(`/api/rooms/${board.room.id}/tasks`, {
         method: "POST",
         body: JSON.stringify({
           title: "Add rate-limit tests",
@@ -62,7 +62,7 @@ export function RoomOnboarding({ demoMode }: { demoMode: boolean }) {
 
   return (
     <div className="mx-auto max-w-2xl p-8">
-      <h2 className="text-lg font-medium">Welcome to your Dev Room</h2>
+      <h2 className="text-lg font-medium">Welcome to your room</h2>
       <p className="mt-1 text-sm text-muted-foreground">
         This is a shared control room: your whole team watches, steers and
         approves the same agent run.
@@ -88,7 +88,7 @@ export function RoomOnboarding({ demoMode }: { demoMode: boolean }) {
       {canCreate ? (
         <div className="mt-8 flex flex-wrap items-center gap-3">
           <p className="text-sm text-muted-foreground">
-            Create your first ticket from the board to get started.
+            Create your first task from the board to get started.
           </p>
           {demoMode ? (
             <Button
@@ -97,7 +97,7 @@ export function RoomOnboarding({ demoMode }: { demoMode: boolean }) {
               onClick={createSample}
               disabled={creating}
             >
-              {creating ? "Creating…" : "Create sample ticket"}
+              {creating ? "Creating…" : "Create sample task"}
             </Button>
           ) : null}
         </div>

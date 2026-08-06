@@ -52,7 +52,7 @@ export function NewRoomForm() {
           name="name"
           required
           maxLength={120}
-          placeholder="AgentGuard Development"
+          placeholder="Payments Platform"
         />
       </div>
       <div className="space-y-1">
@@ -61,7 +61,7 @@ export function NewRoomForm() {
           id="repositoryName"
           name="repositoryName"
           maxLength={200}
-          placeholder="agentguard-api"
+          placeholder="payments-api"
         />
       </div>
       <div className="space-y-1">
@@ -71,7 +71,7 @@ export function NewRoomForm() {
           name="repositoryUrl"
           type="url"
           maxLength={500}
-          placeholder="https://github.com/org/agentguard-api"
+          placeholder="https://github.com/org/payments-api"
         />
         <p className="text-xs text-muted-foreground">
           Metadata only — never cloned or contacted in Stage 1.

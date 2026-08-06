@@ -1,25 +1,25 @@
-import type { Prisma, TicketStatus } from "@prisma/client";
+import type { Prisma, AgentTaskStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/db/client";
 import { ApiError } from "@/lib/api/errors";
-import type { TicketDTO } from "@/lib/types";
+import type { AgentTaskDTO } from "@/lib/types";
 import type {
-  CreateTicketInput,
-  MoveTicketInput,
-  UpdateTicketInput,
+  CreateTaskInput,
+  MoveTaskInput,
+  UpdateTaskInput,
 } from "@/lib/validation/schemas";
-import { nextPositionAfter } from "@/lib/tickets/ordering";
+import { nextPositionAfter } from "@/lib/tasks/ordering";
 
-const ticketInclude = {
+const taskInclude = {
   assignee: { select: { id: true, name: true, email: true, image: true } },
   createdBy: { select: { id: true, name: true, email: true, image: true } },
-} satisfies Prisma.TicketInclude;
+} satisfies Prisma.AgentTaskInclude;
 
-type TicketWithRelations = Prisma.TicketGetPayload<{
-  include: typeof ticketInclude;
+type AgentTaskWithRelations = Prisma.AgentTaskGetPayload<{
+  include: typeof taskInclude;
 }>;
 
-function toTicketDTO(t: TicketWithRelations): TicketDTO {
+function toTaskDTO(t: AgentTaskWithRelations): AgentTaskDTO {
   return {
     id: t.id,
     roomId: t.roomId,
@@ -48,26 +48,26 @@ function toTicketDTO(t: TicketWithRelations): TicketDTO {
   };
 }
 
-/** All tickets in a room, ordered by column then position. */
-export async function listRoomTickets(roomId: string): Promise<TicketDTO[]> {
-  const tickets = await prisma.ticket.findMany({
+/** All tasks in a room, ordered by column then position. */
+export async function listRoomTasks(roomId: string): Promise<AgentTaskDTO[]> {
+  const tasks = await prisma.agentTask.findMany({
     where: { roomId },
     orderBy: [{ status: "asc" }, { position: "asc" }],
-    include: ticketInclude,
+    include: taskInclude,
   });
-  return tickets.map(toTicketDTO);
+  return tasks.map(toTaskDTO);
 }
 
-/** Load a single ticket scoped to a room, or throw 404. */
-export async function getTicketInRoom(
-  ticketId: string,
-): Promise<TicketWithRelations> {
-  const ticket = await prisma.ticket.findUnique({
-    where: { id: ticketId },
-    include: ticketInclude,
+/** Load a single task scoped to a room, or throw 404. */
+export async function getTaskInRoom(
+  taskId: string,
+): Promise<AgentTaskWithRelations> {
+  const task = await prisma.agentTask.findUnique({
+    where: { id: taskId },
+    include: taskInclude,
   });
-  if (!ticket) throw new ApiError("NOT_FOUND", "Ticket not found.");
-  return ticket;
+  if (!task) throw new ApiError("NOT_FOUND", "AgentTask not found.");
+  return task;
 }
 
 /** Verify a candidate assignee is actually a member of the room. */
@@ -87,23 +87,23 @@ async function assertAssigneeIsMember(
   }
 }
 
-export async function createTicket(
+export async function createTask(
   roomId: string,
   createdById: string,
-  input: CreateTicketInput,
-): Promise<TicketDTO> {
+  input: CreateTaskInput,
+): Promise<AgentTaskDTO> {
   await assertAssigneeIsMember(roomId, input.assigneeId);
 
-  const ticket = await prisma.$transaction(async (tx) => {
+  const task = await prisma.$transaction(async (tx) => {
     // Append to the end of the target column.
-    const last = await tx.ticket.findFirst({
+    const last = await tx.agentTask.findFirst({
       where: { roomId, status: input.status },
       orderBy: { position: "desc" },
       select: { position: true },
     });
     const position = nextPositionAfter(last?.position ?? null);
 
-    return tx.ticket.create({
+    return tx.agentTask.create({
       data: {
         roomId,
         title: input.title,
@@ -115,28 +115,28 @@ export async function createTicket(
         createdById,
         version: 1,
       },
-      include: ticketInclude,
+      include: taskInclude,
     });
   });
 
-  return toTicketDTO(ticket);
+  return toTaskDTO(task);
 }
 
 /**
- * Update a ticket with optimistic concurrency. The update only succeeds when
+ * Update a task with optimistic concurrency. The update only succeeds when
  * the stored version equals `expectedVersion`; otherwise a 409 is thrown so the
  * client can refetch and retry.
  */
-export async function updateTicket(
-  ticketId: string,
+export async function updateTask(
+  taskId: string,
   roomId: string,
-  input: UpdateTicketInput,
-): Promise<TicketDTO> {
+  input: UpdateTaskInput,
+): Promise<AgentTaskDTO> {
   if (input.assigneeId !== undefined) {
     await assertAssigneeIsMember(roomId, input.assigneeId);
   }
 
-  const data: Prisma.TicketUpdateInput = {};
+  const data: Prisma.AgentTaskUpdateInput = {};
   if (input.title !== undefined) data.title = input.title;
   if (input.description !== undefined) data.description = input.description;
   if (input.status !== undefined) data.status = input.status;
@@ -147,19 +147,19 @@ export async function updateTicket(
       : { disconnect: true };
   }
 
-  return runVersionedUpdate(ticketId, roomId, input.expectedVersion, data);
+  return runVersionedUpdate(taskId, roomId, input.expectedVersion, data);
 }
 
-/** Move a ticket to another column/position with optimistic concurrency. */
-export async function moveTicket(
-  ticketId: string,
+/** Move a task to another column/position with optimistic concurrency. */
+export async function moveTask(
+  taskId: string,
   roomId: string,
-  input: MoveTicketInput,
-): Promise<TicketDTO> {
+  input: MoveTaskInput,
+): Promise<AgentTaskDTO> {
   // Resolve position: use provided, else append to end of the target column.
   let position = input.position;
   if (position === undefined) {
-    const last = await prisma.ticket.findFirst({
+    const last = await prisma.agentTask.findFirst({
       where: { roomId, status: input.status },
       orderBy: { position: "desc" },
       select: { position: true },
@@ -167,7 +167,7 @@ export async function moveTicket(
     position = nextPositionAfter(last?.position ?? null);
   }
 
-  return runVersionedUpdate(ticketId, roomId, input.expectedVersion, {
+  return runVersionedUpdate(taskId, roomId, input.expectedVersion, {
     status: input.status,
     position,
   });
@@ -179,14 +179,14 @@ export async function moveTicket(
  * wrong room" (404) from "version mismatch" (409).
  */
 async function runVersionedUpdate(
-  ticketId: string,
+  taskId: string,
   roomId: string,
   expectedVersion: number,
-  data: Prisma.TicketUpdateInput,
-): Promise<TicketDTO> {
+  data: Prisma.AgentTaskUpdateInput,
+): Promise<AgentTaskDTO> {
   return prisma.$transaction(async (tx) => {
-    const result = await tx.ticket.updateMany({
-      where: { id: ticketId, roomId, version: expectedVersion },
+    const result = await tx.agentTask.updateMany({
+      where: { id: taskId, roomId, version: expectedVersion },
       data: {
         ...data,
         version: { increment: 1 },
@@ -194,49 +194,49 @@ async function runVersionedUpdate(
     });
 
     if (result.count === 0) {
-      // Determine whether it was a missing ticket or a stale version.
-      const existing = await tx.ticket.findFirst({
-        where: { id: ticketId, roomId },
+      // Determine whether it was a missing task or a stale version.
+      const existing = await tx.agentTask.findFirst({
+        where: { id: taskId, roomId },
         select: { version: true },
       });
       if (!existing) {
-        throw new ApiError("NOT_FOUND", "Ticket not found.");
+        throw new ApiError("NOT_FOUND", "AgentTask not found.");
       }
       throw new ApiError(
-        "TICKET_VERSION_CONFLICT",
-        "This ticket was updated by another room member.",
+        "TASK_VERSION_CONFLICT",
+        "This task was updated by another room member.",
         { currentVersion: existing.version, expectedVersion },
       );
     }
 
-    const updated = await tx.ticket.findUniqueOrThrow({
-      where: { id: ticketId },
-      include: ticketInclude,
+    const updated = await tx.agentTask.findUniqueOrThrow({
+      where: { id: taskId },
+      include: taskInclude,
     });
-    return toTicketDTO(updated);
+    return toTaskDTO(updated);
   });
 }
 
-export async function deleteTicket(
-  ticketId: string,
+export async function deleteTask(
+  taskId: string,
   roomId: string,
 ): Promise<void> {
-  const result = await prisma.ticket.deleteMany({
-    where: { id: ticketId, roomId },
+  const result = await prisma.agentTask.deleteMany({
+    where: { id: taskId, roomId },
   });
   if (result.count === 0) {
-    throw new ApiError("NOT_FOUND", "Ticket not found.");
+    throw new ApiError("NOT_FOUND", "AgentTask not found.");
   }
 }
 
-/** Resolve the roomId a ticket belongs to (for ticket-scoped routes). */
-export async function getTicketRoomId(ticketId: string): Promise<string> {
-  const ticket = await prisma.ticket.findUnique({
-    where: { id: ticketId },
+/** Resolve the roomId a task belongs to (for task-scoped routes). */
+export async function getTaskRoomId(taskId: string): Promise<string> {
+  const task = await prisma.agentTask.findUnique({
+    where: { id: taskId },
     select: { roomId: true },
   });
-  if (!ticket) throw new ApiError("NOT_FOUND", "Ticket not found.");
-  return ticket.roomId;
+  if (!task) throw new ApiError("NOT_FOUND", "AgentTask not found.");
+  return task.roomId;
 }
 
-export type { TicketStatus };
+export type { AgentTaskStatus };

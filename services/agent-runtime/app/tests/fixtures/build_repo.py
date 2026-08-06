@@ -15,11 +15,11 @@ import tempfile
 FIXTURES_DIR = os.path.dirname(__file__)
 
 
-def build_demo_repo(dest: str | None = None, template: str = "agentguard-demo") -> str:
+def build_demo_repo(dest: str | None = None, template: str = "demo-service") -> str:
     """Create a git repo from a fixture template directory and return its path.
 
     `template` names a sibling directory under app/tests/fixtures/ — e.g. the
-    default "agentguard-demo" (no third-party dependencies) or "deps-demo"
+    default "demo-service" (no third-party dependencies) or "deps-demo"
     (has a requirements.txt, for exercising the sandbox's setup phase).
     """
     target = dest or tempfile.mkdtemp(prefix="devroom-fixture-")

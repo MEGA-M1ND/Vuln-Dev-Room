@@ -10,7 +10,7 @@ const suffix = `ins-${Date.now()}`;
 describe.skipIf(!hasDb)("room insights (integration)", () => {
   let roomId = "";
   let emptyRoomId = "";
-  let ticketId = "";
+  let taskId = "";
   let userId = "";
 
   beforeAll(async () => {
@@ -39,10 +39,10 @@ describe.skipIf(!hasDb)("room insights (integration)", () => {
     });
     emptyRoomId = empty.id;
 
-    const ticket = await prisma.ticket.create({
-      data: { roomId, title: "Metrics ticket", createdById: user.id, position: 1000 },
+    const task = await prisma.agentTask.create({
+      data: { roomId, title: "Metrics task", createdById: user.id, position: 1000 },
     });
-    ticketId = ticket.id;
+    taskId = task.id;
 
     // A representative fixture set:
     //   2 succeeded (60s and 120s), 1 failed, 1 cancelled, 1 awaiting approval.
@@ -60,16 +60,16 @@ describe.skipIf(!hasDb)("room insights (integration)", () => {
       return prisma.agentRun.create({
         data: {
           roomId,
-          ticketId,
+          taskId,
           requestedById: userId,
           ownerUserId: userId,
           status,
           graphThreadId: `thr-${suffix}-${idx}`,
-          targetRepositoryKey: "agentguard-demo",
+          targetRepositoryKey: "demo-service",
           startedAt,
           finishedAt,
           // Only a non-terminal run may hold the active slot.
-          activeTicketId: status === "AWAITING_APPROVAL" ? ticketId : null,
+          activeTaskId: status === "AWAITING_APPROVAL" ? taskId : null,
         },
       });
     }

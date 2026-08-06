@@ -22,7 +22,7 @@ def get_run(run_id: str) -> dict[str, Any] | None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT "id","roomId","ticketId","requestedById","agentId","status",
+                SELECT "id","roomId","taskId","requestedById","agentId","status",
                        "graphThreadId","sandboxId","targetRepositoryKey","baseRevision",
                        "startedAt","finishedAt","errorCode","errorSummary","runVersion"
                 FROM "AgentRun" WHERE "id" = %s
@@ -48,8 +48,8 @@ def update_run_status(
     """Update run status, bump runVersion, and manage timestamps + the
     single-active-run guard. Returns the new runVersion.
 
-    Setting a terminal status clears `activeTicketId` (releasing the DB-level
-    lock that prevents a second active run for the ticket).
+    Setting a terminal status clears `activeTaskId` (releasing the DB-level
+    lock that prevents a second active run for the task).
     """
     is_terminal = status in TERMINAL
     with get_conn() as conn:
@@ -63,7 +63,7 @@ def update_run_status(
             if is_terminal:
                 sets.append('"finishedAt" = %s')
                 params.append(_now())
-                sets.append('"activeTicketId" = NULL')
+                sets.append('"activeTaskId" = NULL')
             if sandbox_id is not None:
                 sets.append('"sandboxId" = %s')
                 params.append(sandbox_id)

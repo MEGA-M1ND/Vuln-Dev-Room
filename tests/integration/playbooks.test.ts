@@ -20,7 +20,7 @@ const suffix = `pb-${Date.now()}`;
 describe.skipIf(!hasDb)("playbooks (integration)", () => {
   let roomId = "";
   let otherRoomId = "";
-  let ticketId = "";
+  let taskId = "";
   let ownerId = "";
 
   beforeAll(async () => {
@@ -46,7 +46,7 @@ describe.skipIf(!hasDb)("playbooks (integration)", () => {
       },
     });
     otherRoomId = other.id;
-    const ticket = await prisma.ticket.create({
+    const task = await prisma.agentTask.create({
       data: {
         roomId,
         title: "Add rate-limit tests",
@@ -55,7 +55,7 @@ describe.skipIf(!hasDb)("playbooks (integration)", () => {
         position: 1000,
       },
     });
-    ticketId = ticket.id;
+    taskId = task.id;
   });
 
   afterAll(async () => {
@@ -66,19 +66,19 @@ describe.skipIf(!hasDb)("playbooks (integration)", () => {
 
   beforeEach(async () => {
     await prisma.playbook.deleteMany({ where: { roomId } });
-    await prisma.agentRun.deleteMany({ where: { ticketId } });
+    await prisma.agentRun.deleteMany({ where: { taskId } });
   });
 
   async function succeededRun() {
     const run = await createAgentRun({
       roomId,
-      ticketId,
+      taskId,
       requestedById: ownerId,
-      targetRepositoryKey: "agentguard-demo",
+      targetRepositoryKey: "demo-service",
     });
     await prisma.agentRun.update({
       where: { id: run.id },
-      data: { status: "SUCCEEDED", activeTicketId: null, finishedAt: new Date() },
+      data: { status: "SUCCEEDED", activeTaskId: null, finishedAt: new Date() },
     });
     await prisma.runArtifact.create({
       data: {
@@ -117,9 +117,9 @@ describe.skipIf(!hasDb)("playbooks (integration)", () => {
   it("refuses to draft from a run that has not succeeded", async () => {
     const run = await createAgentRun({
       roomId,
-      ticketId,
+      taskId,
       requestedById: ownerId,
-      targetRepositoryKey: "agentguard-demo",
+      targetRepositoryKey: "demo-service",
     });
     await prisma.agentRun.update({
       where: { id: run.id },
@@ -223,9 +223,9 @@ describe.skipIf(!hasDb)("playbooks (integration)", () => {
     const resolved = await requirePlaybookForRun(roomId, playbook.id);
     const run = await createAgentRun({
       roomId,
-      ticketId,
+      taskId,
       requestedById: ownerId,
-      targetRepositoryKey: "agentguard-demo",
+      targetRepositoryKey: "demo-service",
       playbookId: resolved.id,
     });
     await recordPlaybookUse(resolved.id);

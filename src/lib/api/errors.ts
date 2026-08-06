@@ -15,7 +15,7 @@ export type ApiErrorCode =
   | "UNAUTHENTICATED"
   | "FORBIDDEN"
   | "NOT_FOUND"
-  | "TICKET_VERSION_CONFLICT"
+  | "TASK_VERSION_CONFLICT"
   | "RUN_ALREADY_ACTIVE"
   // The run has finished, so the requested control no longer applies.
   | "RUN_NOT_STEERABLE"
@@ -33,7 +33,7 @@ const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   UNAUTHENTICATED: 401,
   FORBIDDEN: 403,
   NOT_FOUND: 404,
-  TICKET_VERSION_CONFLICT: 409,
+  TASK_VERSION_CONFLICT: 409,
   RUN_ALREADY_ACTIVE: 409,
   RUN_NOT_STEERABLE: 409,
   RUN_NOT_FORKABLE: 409,

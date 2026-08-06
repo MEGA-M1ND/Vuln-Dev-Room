@@ -1,4 +1,4 @@
-import { PrismaClient, MembershipRole, TicketStatus, TicketPriority } from "@prisma/client";
+import { PrismaClient, MembershipRole, AgentTaskStatus, TaskPriority } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -32,13 +32,13 @@ async function main() {
 
   // --- Room ------------------------------------------------------------------
   const room = await prisma.room.upsert({
-    where: { slug: "agentguard-development" },
+    where: { slug: "payments-platform" },
     update: {},
     create: {
-      name: "AgentGuard Development",
-      slug: "agentguard-development",
-      repositoryName: "agentguard-api",
-      repositoryUrl: "https://github.com/example/agentguard-api",
+      name: "Payments Platform",
+      slug: "payments-platform",
+      repositoryName: "payments-api",
+      repositoryUrl: "https://github.com/example/payments-api",
       createdById: prasanna.id,
     },
   });
@@ -58,57 +58,57 @@ async function main() {
     });
   }
 
-  // --- Tickets ---------------------------------------------------------------
+  // --- AgentTasks ---------------------------------------------------------------
   // Keyed by a deterministic id so re-seeding is idempotent.
-  const tickets = [
+  const tasks = [
     {
-      id: "seed-ticket-rate-limit",
+      id: "seed-task-rate-limit",
       title: "Add rate-limit tests",
       description:
         "Cover the token-bucket limiter with unit + integration tests, including burst and refill behavior.",
-      status: TicketStatus.BACKLOG,
-      priority: TicketPriority.MEDIUM,
+      status: AgentTaskStatus.BACKLOG,
+      priority: TaskPriority.MEDIUM,
       assigneeId: null,
       position: 1000,
       createdById: prasanna.id,
     },
     {
-      id: "seed-ticket-jwt",
+      id: "seed-task-jwt",
       title: "Refactor JWT validation",
       description:
         "Extract JWT verification into a reusable module and validate audience + issuer claims.",
-      status: TicketStatus.IN_PROGRESS,
-      priority: TicketPriority.HIGH,
+      status: AgentTaskStatus.IN_PROGRESS,
+      priority: TaskPriority.HIGH,
       assigneeId: priya.id,
       position: 1000,
       createdById: priya.id,
     },
     {
-      id: "seed-ticket-policy-audit",
+      id: "seed-task-policy-audit",
       title: "Policy audit endpoint",
       description:
         "Expose a read-only endpoint that returns the effective policy decision trace for a request.",
-      status: TicketStatus.REVIEW,
-      priority: TicketPriority.URGENT,
+      status: AgentTaskStatus.REVIEW,
+      priority: TaskPriority.URGENT,
       assigneeId: arun.id,
       position: 1000,
       createdById: arun.id,
     },
     {
-      id: "seed-ticket-agent-identity",
+      id: "seed-task-agent-identity",
       title: "Agent identity schema",
       description:
         "Define the durable schema for agent identities and their capability grants.",
-      status: TicketStatus.DONE,
-      priority: TicketPriority.LOW,
+      status: AgentTaskStatus.DONE,
+      priority: TaskPriority.LOW,
       assigneeId: prasanna.id,
       position: 1000,
       createdById: prasanna.id,
     },
   ];
 
-  for (const t of tickets) {
-    await prisma.ticket.upsert({
+  for (const t of tasks) {
+    await prisma.agentTask.upsert({
       where: { id: t.id },
       update: {
         title: t.title,
@@ -126,7 +126,7 @@ async function main() {
   console.log("Seed complete:");
   console.log(`  Room:     ${room.name} (${room.slug})`);
   console.log(`  Users:    Prasanna (OWNER), Priya (ENGINEER), Arun (ENGINEER)`);
-  console.log(`  Tickets:  ${tickets.length}`);
+  console.log(`  AgentTasks:  ${tasks.length}`);
 }
 
 main()

@@ -16,7 +16,7 @@ export default async function NewRoomPage() {
       >
         ← Back to rooms
       </Link>
-      <h1 className="mt-2 text-2xl font-semibold">Create a Dev Room</h1>
+      <h1 className="mt-2 text-2xl font-semibold">Create a room</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Name your room and optionally link a repository. Repository details are
         metadata only in Stage 1 — nothing is cloned or fetched.

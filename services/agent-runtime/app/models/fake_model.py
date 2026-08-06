@@ -98,7 +98,7 @@ class FakeModel(Model):
 
         if edits:
             plan = (
-                f"Address ticket: {request.title}\n\n"
+                f"Address task: {request.title}\n\n"
                 "Approach:\n"
                 f"1. Inspect the {request.language} repository.\n"
                 "2. Locate stubbed implementations marked with "
@@ -113,7 +113,7 @@ class FakeModel(Model):
             )
         else:
             plan = (
-                f"Address ticket: {request.title}\n\n"
+                f"Address task: {request.title}\n\n"
                 "Inspected the repository but found no actionable "
                 "`# devroom:implement` markers within the allowed paths, so no "
                 "edits were proposed."

@@ -234,7 +234,7 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
                 {"interventionId": item.get("id"), "authorUserId": item.get("authorUserId")},
             )
 
-        description = state.get("ticket_description", "") or ""
+        description = state.get("task_description", "") or ""
         if all_guidance:
             # Human guidance is appended as explicit, attributed instructions.
             description = (
@@ -253,7 +253,7 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
         if not state.get("exploration_done", False):
             excerpts, _ = _explore_repository(
                 PlanRequest(
-                    title=state.get("ticket_title", ""),
+                    title=state.get("task_title", ""),
                     description=description,
                     language=ctx.language,
                     repo_tree=state.get("repo_tree", []),
@@ -263,7 +263,7 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
 
         result = ctx.model.propose_change(
             PlanRequest(
-                title=state.get("ticket_title", ""),
+                title=state.get("task_title", ""),
                 description=description,
                 language=ctx.language,
                 repo_tree=state.get("repo_tree", []),
@@ -404,8 +404,8 @@ def _build_graph(ctx: RunContext, checkpointer: Any) -> Any:
 class RunRequest:
     run_id: str
     graph_thread_id: str
-    ticket_title: str
-    ticket_description: str
+    task_title: str
+    task_description: str
     repo_config: RepositoryConfig
     allowed_paths: list[str]
     # Phase 1c: for a connected-repo run, the exact commit a human already
@@ -515,8 +515,8 @@ def start_run(request: RunRequest, settings: Settings, notifier: Any = None) -> 
             app.invoke(
                 {
                     "run_id": request.run_id,
-                    "ticket_title": request.ticket_title,
-                    "ticket_description": request.ticket_description,
+                    "task_title": request.task_title,
+                    "task_description": request.task_description,
                     "language": effective_repo.language,
                     "allowed_paths": toolset.allowed_paths,
                 },
@@ -779,7 +779,7 @@ def fork_run(
     """Fork (roadmap Phase 4): branch a run parked at the approval gate.
 
     Copies the source run's checkpointed thread onto this run's own thread
-    (already created by the web app, on its own cloned ticket — see
+    (already created by the web app, on its own cloned task — see
     `docs/ROADMAP.md`), so the fork starts `AWAITING_APPROVAL` with exactly
     the plan the source had at the moment of forking, free to be approved,
     rejected, or redirected independently from there.
@@ -844,8 +844,8 @@ def review_run(
 
     Only a SUCCEEDED source is reviewable — that is the only status with a
     diff worth reviewing, and (see `docs/ROADMAP.md`) a review run reuses the
-    source's own ticket rather than cloning one the way a fork does, which
-    only works once the source is terminal and has released the ticket's
+    source's own task rather than cloning one the way a fork does, which
+    only works once the source is terminal and has released the task's
     active-run slot. Never touches the sandbox or repository: everything
     reviewer-agent needs was already captured durably by the run it reviews,
     so this is a pure read + model call, not a graph.

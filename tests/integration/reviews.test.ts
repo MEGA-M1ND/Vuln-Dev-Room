@@ -26,7 +26,7 @@ const suffix = `review-${Date.now()}`;
 
 describe.skipIf(!hasDb)("Reviewer-agent (roadmap Phase 5, integration)", () => {
   let roomId = "";
-  let ticketId = "";
+  let taskId = "";
   let ownerId = "";
   let engineerId = "";
 
@@ -54,10 +54,10 @@ describe.skipIf(!hasDb)("Reviewer-agent (roadmap Phase 5, integration)", () => {
       },
     });
     roomId = room.id;
-    const ticket = await prisma.ticket.create({
-      data: { roomId, title: "Source ticket", createdById: owner.id, position: 1000 },
+    const task = await prisma.agentTask.create({
+      data: { roomId, title: "Source task", createdById: owner.id, position: 1000 },
     });
-    ticketId = ticket.id;
+    taskId = task.id;
   });
 
   afterAll(async () => {
@@ -67,16 +67,16 @@ describe.skipIf(!hasDb)("Reviewer-agent (roadmap Phase 5, integration)", () => {
   });
 
   beforeEach(async () => {
-    await prisma.agentRun.deleteMany({ where: { ticketId } });
+    await prisma.agentRun.deleteMany({ where: { taskId } });
     mockStartReviewAgentRun.mockReset();
   });
 
   async function freshRun() {
     return createAgentRun({
       roomId,
-      ticketId,
+      taskId,
       requestedById: ownerId,
-      targetRepositoryKey: "agentguard-demo",
+      targetRepositoryKey: "demo-service",
     });
   }
 
@@ -100,17 +100,17 @@ describe.skipIf(!hasDb)("Reviewer-agent (roadmap Phase 5, integration)", () => {
     const source = await freshRun();
     await prisma.agentRun.update({
       where: { id: source.id },
-      data: { status: "SUCCEEDED", activeTicketId: null },
+      data: { status: "SUCCEEDED", activeTaskId: null },
     });
     const reviewer = await prisma.agentRun.create({
       data: {
         roomId,
-        ticketId,
+        taskId,
         requestedById: ownerId,
         agentId: "reviewer-agent",
         status: "SUCCEEDED",
         graphThreadId: `thread_${suffix}_reviewer`,
-        targetRepositoryKey: "agentguard-demo",
+        targetRepositoryKey: "demo-service",
         reviewedRunId: source.id,
       },
     });
@@ -126,11 +126,11 @@ describe.skipIf(!hasDb)("Reviewer-agent (roadmap Phase 5, integration)", () => {
     });
   });
 
-  it("starts a reviewer-agent run on the SAME ticket, not a clone", async () => {
+  it("starts a reviewer-agent run on the SAME task, not a clone", async () => {
     const source = await freshRun();
     await prisma.agentRun.update({
       where: { id: source.id },
-      data: { status: "SUCCEEDED", activeTicketId: null },
+      data: { status: "SUCCEEDED", activeTaskId: null },
     });
 
     mockStartReviewAgentRun.mockImplementation(async (runId) => {
@@ -142,22 +142,22 @@ describe.skipIf(!hasDb)("Reviewer-agent (roadmap Phase 5, integration)", () => {
     expect(mockStartReviewAgentRun).toHaveBeenCalledWith(review.id, source.id);
     expect(review.agentId).toBe("reviewer-agent");
     expect(review.reviewedRunId).toBe(source.id);
-    expect(review.ticketId).toBe(source.ticketId); // unlike a fork: no new ticket
+    expect(review.taskId).toBe(source.taskId); // unlike a fork: no new task
     expect(review.parentRunId).toBeNull();
 
     const row = await prisma.agentRun.findUniqueOrThrow({ where: { id: review.id } });
-    expect(row.activeTicketId).toBe(ticketId);
+    expect(row.activeTaskId).toBe(taskId);
     expect(row.requestedById).toBe(engineerId);
 
     const events = await prisma.runEvent.findMany({ where: { runId: review.id } });
     expect(events.map((e) => e.type)).toContain("RUN_CREATED");
   });
 
-  it("an unreachable runtime fails the review run and releases the ticket's active slot", async () => {
+  it("an unreachable runtime fails the review run and releases the task's active slot", async () => {
     const source = await freshRun();
     await prisma.agentRun.update({
       where: { id: source.id },
-      data: { status: "SUCCEEDED", activeTicketId: null },
+      data: { status: "SUCCEEDED", activeTaskId: null },
     });
     mockStartReviewAgentRun.mockRejectedValue(
       new ApiError("INTERNAL_ERROR", "Could not reach the agent runtime service."),
@@ -170,28 +170,28 @@ describe.skipIf(!hasDb)("Reviewer-agent (roadmap Phase 5, integration)", () => {
     });
     expect(reviewRow.status).toBe("FAILED");
     expect(reviewRow.errorCode).toBe("RUNTIME_UNAVAILABLE");
-    expect(reviewRow.activeTicketId).toBeNull();
+    expect(reviewRow.activeTaskId).toBeNull();
     // The lineage forkRun controls directly still recorded correctly.
-    expect(reviewRow.ticketId).toBe(ticketId);
+    expect(reviewRow.taskId).toBe(taskId);
   });
 
-  it("cannot review while the ticket already has another active run", async () => {
+  it("cannot review while the task already has another active run", async () => {
     const source = await freshRun();
     await prisma.agentRun.update({
       where: { id: source.id },
-      data: { status: "SUCCEEDED", activeTicketId: null },
+      data: { status: "SUCCEEDED", activeTaskId: null },
     });
-    // Simulate a second, concurrently active run on the same ticket.
+    // Simulate a second, concurrently active run on the same task.
     const blocker = await prisma.agentRun.create({
       data: {
         roomId,
-        ticketId,
+        taskId,
         requestedById: ownerId,
         agentId: "backend-agent",
         status: "RUNNING",
         graphThreadId: `thread_${suffix}_blocker`,
-        targetRepositoryKey: "agentguard-demo",
-        activeTicketId: ticketId,
+        targetRepositoryKey: "demo-service",
+        activeTaskId: taskId,
       },
     });
 

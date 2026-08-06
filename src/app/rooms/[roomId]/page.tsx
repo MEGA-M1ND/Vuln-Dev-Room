@@ -9,7 +9,7 @@ import {
 } from "@/env";
 import { liveblocksRoomId } from "@/lib/liveblocks/server";
 import { listRoomMembers } from "@/lib/rooms/service";
-import { listRoomTickets } from "@/lib/tickets/service";
+import { listRoomTasks } from "@/lib/tasks/service";
 import type { BoardDTO, RoomDTO } from "@/lib/types";
 import { DevRoomShell } from "@/components/dev-room/dev-room-shell";
 import { RoomErrorState } from "@/components/dev-room/room-error-state";
@@ -51,9 +51,9 @@ export default async function RoomPage({
   }
 
   const room = await prisma.room.findUniqueOrThrow({ where: { id: roomId } });
-  const [members, tickets] = await Promise.all([
+  const [members, tasks] = await Promise.all([
     listRoomMembers(roomId),
-    listRoomTickets(roomId),
+    listRoomTasks(roomId),
   ]);
 
   const roomDTO: RoomDTO = {
@@ -68,7 +68,7 @@ export default async function RoomPage({
     role: membership.role,
   };
 
-  const board: BoardDTO = { room: roomDTO, members, tickets };
+  const board: BoardDTO = { room: roomDTO, members, tasks };
 
   return (
     <DevRoomShell

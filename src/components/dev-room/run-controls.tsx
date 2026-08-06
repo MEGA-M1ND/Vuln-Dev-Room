@@ -27,7 +27,7 @@ export function RunControls({
   run: RunDTO;
   onChanged: () => void;
 }) {
-  const { role, board, refetch, selectTicket } = useBoard();
+  const { role, board, refetch, selectTask } = useBoard();
   const [dialog, setDialog] = React.useState<
     null | "cancel" | "redirect" | "handoff" | "fork"
   >(null);
@@ -74,10 +74,10 @@ export function RunControls({
         method: "POST",
       });
       setDialog(null);
-      // The fork lives on its own new ticket — jump the room there so the
+      // The fork lives on its own new task — jump the room there so the
       // person who forked can immediately see it land at the approval gate.
       await refetch();
-      selectTicket(res.run.ticketId);
+      selectTask(res.run.taskId);
       onChanged();
     } catch (err) {
       setError(
@@ -216,7 +216,7 @@ export function RunControls({
         open={dialog === "fork"}
         onClose={() => setDialog(null)}
         title="Fork this run?"
-        description="Creates a new ticket with a copy of this run, paused at the same approval gate with the same proposed plan. Approve, reject, or redirect it independently — the original run is untouched."
+        description="Creates a new task with a copy of this run, paused at the same approval gate with the same proposed plan. Approve, reject, or redirect it independently — the original run is untouched."
       >
         <div className="space-y-4">
           {error ? (

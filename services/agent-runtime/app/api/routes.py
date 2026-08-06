@@ -77,8 +77,8 @@ def _build_run_request(
     return RunRequest(
         run_id=run["id"],
         graph_thread_id=str(run["graphThreadId"]),
-        ticket_title=title,
-        ticket_description=description or "",
+        task_title=title,
+        task_description=description or "",
         repo_config=repo,
         allowed_paths=allowed_paths,
         pinned_revision=pinned_revision,
@@ -328,7 +328,7 @@ def fork_run_endpoint(
     settings: Settings = Depends(get_settings),
 ) -> ControlResponse:
     """Fork (roadmap Phase 4): copy a source run's checkpointed plan onto
-    this new run — already created by the web app on its own cloned ticket.
+    this new run — already created by the web app on its own cloned task.
 
     Synchronous: unlike start/resume/replan this never touches Docker (the
     source is at the gate, so nothing has been written yet), so there is no
@@ -362,7 +362,7 @@ def review_run_endpoint(
 ) -> ControlResponse:
     """Reviewer-agent (roadmap Phase 5): review a source run's already-captured
     plan/diff/test-result — already created by the web app on the source
-    run's own ticket.
+    run's own task.
 
     Backgrounded like start/resume/replan: it calls a Model, which may be
     network-bound for a real provider, so the caller gets QUEUED immediately

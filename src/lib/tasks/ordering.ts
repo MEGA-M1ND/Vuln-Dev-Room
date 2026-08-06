@@ -1,13 +1,13 @@
-import type { TicketStatus } from "@prisma/client";
+import type { AgentTaskStatus } from "@prisma/client";
 
 /**
- * Fractional ordering helpers. Positions are floats so a ticket can always be
+ * Fractional ordering helpers. Positions are floats so a task can always be
  * inserted between two neighbors without renumbering the whole column.
  */
 
 const STEP = 1000;
 
-/** Position for a brand-new ticket appended to the end of a column. */
+/** Position for a brand-new task appended to the end of a column. */
 export function nextPositionAfter(maxPosition: number | null): number {
   if (maxPosition === null || !Number.isFinite(maxPosition)) return STEP;
   return maxPosition + STEP;
@@ -15,7 +15,7 @@ export function nextPositionAfter(maxPosition: number | null): number {
 
 /**
  * Compute a position between two existing positions. Used when dropping a
- * ticket between two cards. Either bound may be null (top/bottom of column).
+ * task between two cards. Either bound may be null (top/bottom of column).
  */
 export function positionBetween(
   before: number | null,
@@ -27,7 +27,7 @@ export function positionBetween(
   return (before + after) / 2;
 }
 
-export const TICKET_STATUS_ORDER: readonly TicketStatus[] = [
+export const TASK_STATUS_ORDER: readonly AgentTaskStatus[] = [
   "BACKLOG",
   "IN_PROGRESS",
   "REVIEW",
@@ -35,14 +35,14 @@ export const TICKET_STATUS_ORDER: readonly TicketStatus[] = [
 ] as const;
 
 /**
- * All status transitions are permitted in Stage 1 (a ticket may move to any
+ * All status transitions are permitted in Stage 1 (a task may move to any
  * column, including backwards) — but a transition to the SAME status is a
  * no-op that callers may want to detect. Kept as an explicit function so the
  * policy is centralized and testable if it tightens later.
  */
 export function isValidStatusTransition(
-  from: TicketStatus,
-  to: TicketStatus,
+  from: AgentTaskStatus,
+  to: AgentTaskStatus,
 ): boolean {
-  return TICKET_STATUS_ORDER.includes(from) && TICKET_STATUS_ORDER.includes(to);
+  return TASK_STATUS_ORDER.includes(from) && TASK_STATUS_ORDER.includes(to);
 }

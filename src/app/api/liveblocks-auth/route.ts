@@ -21,7 +21,7 @@ import { colorForId } from "@/lib/utils";
  *   4. issue a token scoped to ONLY that room, carrying server-derived userInfo.
  *
  * A non-member is refused (403). VIEWERs still get access to presence + comment
- * threads; ticket mutations are enforced separately by the REST API.
+ * threads; task mutations are enforced separately by the REST API.
  */
 const ROOM_PREFIX = "dev-room:";
 
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     session.allow(
       liveblocksRoomId(appRoomId),
       // VIEWERs get presence + comments; write access to Storage is unused in
-      // Stage 1, so FULL_ACCESS here only governs presence/threads. Ticket
+      // Stage 1, so FULL_ACCESS here only governs presence/threads. AgentTask
       // authority lives in Postgres + the REST API, not Liveblocks.
       can(membership.role, "presence:view")
         ? session.FULL_ACCESS

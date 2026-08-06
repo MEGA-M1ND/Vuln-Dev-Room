@@ -105,7 +105,7 @@ def test_review_fails_when_new_run_row_missing(settings, runs, artifacts):
 def test_review_posts_a_structured_review_and_succeeds(settings, runs, artifacts, monkeypatch):
     runs["source"] = {"id": "source", "status": "SUCCEEDED"}
     runs["new"] = {"id": "new", "status": "QUEUED"}
-    artifacts["seed"]("source", "PLAN", contentText="Address ticket: t\n")
+    artifacts["seed"]("source", "PLAN", contentText="Address task: t\n")
     artifacts["seed"]("source", "DIFF", contentText="diff --git a/x.py b/x.py\n")
     artifacts["seed"](
         "source", "TEST_RESULT", contentText="1 passed", metadataJson={"passed": True}
@@ -121,7 +121,7 @@ def test_review_posts_a_structured_review_and_succeeds(settings, runs, artifacts
         def review(self, request):
             # The request is built entirely from the source run's own
             # captured artifacts — never a fresh repository/sandbox read.
-            assert request.plan_text == "Address ticket: t\n"
+            assert request.plan_text == "Address task: t\n"
             assert request.test_passed is True
             return fake_result
 

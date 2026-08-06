@@ -28,7 +28,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-// Runs in these states are still in progress and are polled.
+// Runs in these states are executing and are polled for progress. Deliberately
+// narrower than ACTIVE_RUN_STATUSES: WAITING_FOR_INPUT / BLOCKED / REVIEW_READY
+// still hold the task's active slot, but nothing is running, so polling them
+// would animate a "working" pulse over a run that is in fact waiting on a human.
 const ACTIVE: AgentRunStatus[] = ["QUEUED", "RUNNING", "AWAITING_APPROVAL"];
 
 const STATUS_STYLES: Record<AgentRunStatus, string> = {
@@ -38,6 +41,12 @@ const STATUS_STYLES: Record<AgentRunStatus, string> = {
   SUCCEEDED: "text-green-700 border-green-300",
   FAILED: "text-red-700 border-red-300",
   CANCELLED: "text-slate-600 border-slate-300",
+  // Agent Dev Room pivot: states an external agent or a human can report.
+  WAITING_FOR_INPUT: "text-amber-700 border-amber-300",
+  BLOCKED: "text-orange-700 border-orange-300",
+  REVIEW_READY: "text-violet-700 border-violet-300",
+  MERGED: "text-green-700 border-green-300",
+  ABANDONED: "text-slate-600 border-slate-300",
 };
 
 const STATUS_LABEL: Record<AgentRunStatus, string> = {
@@ -47,6 +56,11 @@ const STATUS_LABEL: Record<AgentRunStatus, string> = {
   SUCCEEDED: "SUCCEEDED",
   FAILED: "FAILED",
   CANCELLED: "CANCELLED",
+  WAITING_FOR_INPUT: "WAITING FOR INPUT",
+  BLOCKED: "BLOCKED",
+  REVIEW_READY: "REVIEW READY",
+  MERGED: "MERGED",
+  ABANDONED: "ABANDONED",
 };
 
 // Human-friendly labels for the activity timeline.
@@ -100,11 +114,11 @@ function toolCallDetail(e: RunEventDTO): string | null {
 }
 
 /**
- * Stage 3 ticket-level agent panel: start a run, watch it live (Liveblocks
+ * Stage 3 task-level agent panel: start a run, watch it live (Liveblocks
  * `RUN_UPDATED` when configured, polling otherwise), approve/reject the plan at
  * the gate, and review the read-only plan / diff / test / summary artifacts.
  */
-export function AgentRunPanel({ ticketId }: { ticketId: string }) {
+export function AgentRunPanel({ taskId }: { taskId: string }) {
   const { role, agentEnabled, board } = useBoard();
   const { enabled: realtimeEnabled, setActivity } = usePresence();
   const canRun = can(role, "run:create");
@@ -122,7 +136,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
   const runId = run?.id ?? null;
   const isActive = run ? ACTIVE.includes(run.status) : false;
 
-  // Load the latest run for this ticket on mount / ticket change.
+  // Load the latest run for this task on mount / task change.
   React.useEffect(() => {
     let cancelled = false;
     setRun(null);
@@ -130,7 +144,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
     setEvents([]);
     setInterventions([]);
     setError(null);
-    apiFetch<{ run: RunDTO | null }>(`/api/tickets/${ticketId}/runs`)
+    apiFetch<{ run: RunDTO | null }>(`/api/tasks/${taskId}/runs`)
       .then((res) => {
         if (!cancelled) setRun(res.run);
       })
@@ -138,15 +152,15 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [ticketId]);
+  }, [taskId]);
 
   const refetch = React.useCallback(async () => {
     if (!runId) {
       // No run known locally yet — a realtime signal may mean a teammate
-      // just started one, so check the ticket for its latest run.
+      // just started one, so check the task for its latest run.
       try {
         const res = await apiFetch<{ run: RunDTO | null }>(
-          `/api/tickets/${ticketId}/runs`,
+          `/api/tasks/${taskId}/runs`,
         );
         if (res.run) setRun(res.run);
       } catch {
@@ -170,7 +184,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
     } catch {
       /* transient */
     }
-  }, [runId, ticketId]);
+  }, [runId, taskId]);
 
   // Coalesce broadcast-driven refetches: a busy run emits many events and every
   // client in the room receives each one.
@@ -202,7 +216,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
     setError(null);
     try {
       const res = await apiFetch<{ run: RunDTO }>(
-        `/api/tickets/${ticketId}/runs`,
+        `/api/tasks/${taskId}/runs`,
         { method: "POST", body: JSON.stringify(opts) },
       );
       setRun(res.run);
@@ -224,7 +238,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
       const res = await apiFetch<{ run: RunDTO }>(`/api/runs/${runId}/review`, {
         method: "POST",
       });
-      // The reviewer-agent run lands on this same ticket and becomes its
+      // The reviewer-agent run lands on this same task and becomes its
       // newest run, so it replaces what the panel is showing.
       setRun(res.run);
       setArtifacts([]);
@@ -426,7 +440,7 @@ export function AgentRunPanel({ ticketId }: { ticketId: string }) {
 
       {run && run.agentId === "reviewer-agent" && run.reviewedRunId ? (
         <p className="text-xs text-muted-foreground">
-          Reviewing an earlier successful run of this ticket.
+          Reviewing an earlier successful run of this task.
         </p>
       ) : null}
 
@@ -604,7 +618,7 @@ function ArtifactSection({
 
 /**
  * The human steering record for a run: guidance given, hand-offs, and stop
- * requests. Distinct from ticket comments, which are team discussion.
+ * requests. Distinct from task comments, which are team discussion.
  */
 function InterventionList({
   interventions,

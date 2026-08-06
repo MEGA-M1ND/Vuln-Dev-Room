@@ -5,21 +5,21 @@ import { z } from "zod";
  * are shared by API routes (server validation) and client forms.
  */
 
-export const ticketStatusSchema = z.enum([
+export const taskStatusSchema = z.enum([
   "BACKLOG",
   "IN_PROGRESS",
   "REVIEW",
   "DONE",
 ]);
-export type TicketStatusInput = z.infer<typeof ticketStatusSchema>;
+export type AgentTaskStatusInput = z.infer<typeof taskStatusSchema>;
 
-export const ticketPrioritySchema = z.enum([
+export const taskPrioritySchema = z.enum([
   "LOW",
   "MEDIUM",
   "HIGH",
   "URGENT",
 ]);
-export type TicketPriorityInput = z.infer<typeof ticketPrioritySchema>;
+export type TaskPriorityInput = z.infer<typeof taskPrioritySchema>;
 
 export const membershipRoleSchema = z.enum(["OWNER", "ENGINEER", "VIEWER"]);
 
@@ -66,23 +66,23 @@ export const updateRoomSchema = z
   });
 export type UpdateRoomInput = z.infer<typeof updateRoomSchema>;
 
-// --- Tickets -----------------------------------------------------------------
+// --- AgentTasks -----------------------------------------------------------------
 
-export const createTicketSchema = z.object({
+export const createTaskSchema = z.object({
   title: z.string().trim().min(1, "Title is required").max(200),
   description: z.string().trim().max(5000).optional(),
-  status: ticketStatusSchema.default("BACKLOG"),
-  priority: ticketPrioritySchema.default("MEDIUM"),
+  status: taskStatusSchema.default("BACKLOG"),
+  priority: taskPrioritySchema.default("MEDIUM"),
   assigneeId: z.string().cuid().optional().nullable(),
 });
-export type CreateTicketInput = z.infer<typeof createTicketSchema>;
+export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 
-export const updateTicketSchema = z
+export const updateTaskSchema = z
   .object({
     title: z.string().trim().min(1).max(200).optional(),
     description: z.string().trim().max(5000).nullable().optional(),
-    status: ticketStatusSchema.optional(),
-    priority: ticketPrioritySchema.optional(),
+    status: taskStatusSchema.optional(),
+    priority: taskPrioritySchema.optional(),
     assigneeId: z.string().cuid().nullable().optional(),
     // Optimistic concurrency token the client last saw.
     expectedVersion: z.number().int().positive(),
@@ -94,7 +94,7 @@ export const updateTicketSchema = z
       ),
     { message: "At least one field to update must be provided" },
   );
-export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
+export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 
 // --- Agent run controls (MVP Phase 1) ----------------------------------------
 
@@ -145,11 +145,11 @@ export const updatePlaybookSchema = z.object({
   isArchived: z.boolean(),
 });
 
-export const moveTicketSchema = z.object({
-  status: ticketStatusSchema,
+export const moveTaskSchema = z.object({
+  status: taskStatusSchema,
   // New position within the target column. Optional — server appends to end
   // when omitted.
   position: z.number().optional(),
   expectedVersion: z.number().int().positive(),
 });
-export type MoveTicketInput = z.infer<typeof moveTicketSchema>;
+export type MoveTaskInput = z.infer<typeof moveTaskSchema>;

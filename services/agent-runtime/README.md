@@ -197,7 +197,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8787
 
 The web app must set `DEVROOM_AGENT_SERVICE_URL=http://127.0.0.1:8787`,
 `DEVROOM_AGENT_SERVICE_TOKEN=<same token>`, and
-`DEVROOM_DEFAULT_REPOSITORY_KEY=agentguard-demo`.
+`DEVROOM_DEFAULT_REPOSITORY_KEY=demo-service`.
 
 ## Real repositories (Phase 1c)
 
@@ -246,7 +246,7 @@ python -m pytest -q
   survives into the agent phase, and that the agent container still has no
   network either way.
 
-The fixture repo (`app/tests/fixtures/agentguard-demo/`) ships a genuinely
+The fixture repo (`app/tests/fixtures/demo-service/`) ships a genuinely
 failing test and a stub marked `# devroom:implement`; the agent implements it in
 the sandbox, turning the test green. Nothing is faked.
 `app/tests/fixtures/deps-demo/` is its counterpart with a dependency, for

@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 
 import { prisma } from "@/lib/db/client";
-import { createAgentRun, latestRunForTicket, serializeRun } from "@/lib/agent/runs";
+import { createAgentRun, latestRunForTask, serializeRun } from "@/lib/agent/runs";
 import {
   requestCancel,
   requestRedirect,
@@ -16,7 +16,7 @@ const suffix = `ctl-${Date.now()}`;
 
 describe.skipIf(!hasDb)("Phase 1 run controls (integration)", () => {
   let roomId = "";
-  let ticketId = "";
+  let taskId = "";
   let ownerId = "";
   let engineerId = "";
   let outsiderId = "";
@@ -49,10 +49,10 @@ describe.skipIf(!hasDb)("Phase 1 run controls (integration)", () => {
       },
     });
     roomId = room.id;
-    const ticket = await prisma.ticket.create({
-      data: { roomId, title: "Ctl ticket", createdById: owner.id, position: 1000 },
+    const task = await prisma.agentTask.create({
+      data: { roomId, title: "Ctl task", createdById: owner.id, position: 1000 },
     });
-    ticketId = ticket.id;
+    taskId = task.id;
   });
 
   afterAll(async () => {
@@ -63,17 +63,17 @@ describe.skipIf(!hasDb)("Phase 1 run controls (integration)", () => {
     await prisma.$disconnect();
   });
 
-  // Each test starts from a clean slate: no active run for the ticket.
+  // Each test starts from a clean slate: no active run for the task.
   beforeEach(async () => {
-    await prisma.agentRun.deleteMany({ where: { ticketId } });
+    await prisma.agentRun.deleteMany({ where: { taskId } });
   });
 
   async function freshRun() {
     return createAgentRun({
       roomId,
-      ticketId,
+      taskId,
       requestedById: ownerId,
-      targetRepositoryKey: "agentguard-demo",
+      targetRepositoryKey: "demo-service",
     });
   }
 
@@ -136,8 +136,8 @@ describe.skipIf(!hasDb)("Phase 1 run controls (integration)", () => {
 
     const after = await prisma.agentRun.findUniqueOrThrow({ where: { id: run.id } });
     expect(after.status).toBe("CANCELLED");
-    // The ticket's single-active-run slot is released.
-    expect(after.activeTicketId).toBeNull();
+    // The task's single-active-run slot is released.
+    expect(after.activeTaskId).toBeNull();
     expect(after.finishedAt).not.toBeNull();
 
     const events = await prisma.runEvent.findMany({ where: { runId: run.id } });
@@ -168,7 +168,7 @@ describe.skipIf(!hasDb)("Phase 1 run controls (integration)", () => {
     const run = await freshRun();
     await prisma.agentRun.update({
       where: { id: run.id },
-      data: { status: "SUCCEEDED", activeTicketId: null, finishedAt: new Date() },
+      data: { status: "SUCCEEDED", activeTaskId: null, finishedAt: new Date() },
     });
 
     const first = await requestCancel(run.id, ownerId);
@@ -241,7 +241,7 @@ describe.skipIf(!hasDb)("Phase 1 run controls (integration)", () => {
     const run = await freshRun();
     await prisma.agentRun.update({
       where: { id: run.id },
-      data: { status: "SUCCEEDED", activeTicketId: null },
+      data: { status: "SUCCEEDED", activeTaskId: null },
     });
     await expect(
       requestRedirect(run.id, ownerId, "too late"),
@@ -306,7 +306,7 @@ describe.skipIf(!hasDb)("Phase 1 run controls (integration)", () => {
       data: { sandboxId: "sbx_secret_internal", status: "RUNNING" },
     });
 
-    const dto = await latestRunForTicket(ticketId);
+    const dto = await latestRunForTask(taskId);
     expect(dto).not.toBeNull();
     const serialized = JSON.stringify(dto);
     expect(serialized).not.toContain("sbx_secret_internal");

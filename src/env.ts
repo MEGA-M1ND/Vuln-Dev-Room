@@ -54,7 +54,7 @@ const serverSchema = z.object({
   DEVROOM_DEFAULT_REPOSITORY_KEY: z
     .string()
     .optional()
-    .default("agentguard-demo"),
+    .default("demo-service"),
 
   // --- MVP Phase 3: GitHub delivery (optional, OFF by default) ---
   // The whole integration is gated on this flag; without it the product runs
@@ -173,6 +173,6 @@ export const isAgentRuntimeConfigured =
 export const isGitHubConfigured =
   env.DEVROOM_GITHUB_ENABLED === true && env.GITHUB_TOKEN.length > 0;
 
-/** Demo-only affordances (e.g. sample ticket seeding). Never in production. */
+/** Demo-only affordances (e.g. sample task seeding). Never in production. */
 export const isDemoMode =
   env.NODE_ENV !== "production" && env.DEVROOM_DEMO_MODE === true;

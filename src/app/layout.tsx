@@ -4,7 +4,7 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Dev Room",
+  title: "Agent Dev Room",
   description:
     "A shared multiplayer control room for engineering teams — Stage 1.",
 };

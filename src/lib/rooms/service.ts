@@ -57,7 +57,7 @@ export async function listRoomsForUser(
       role: true,
       room: {
         include: {
-          _count: { select: { memberships: true, tickets: true } },
+          _count: { select: { memberships: true, tasks: true } },
         },
       },
     },
@@ -66,7 +66,7 @@ export async function listRoomsForUser(
   return memberships.map((m) => ({
     ...toRoomDTO(m.room, m.role),
     memberCount: m.room._count.memberships,
-    ticketCount: m.room._count.tickets,
+    taskCount: m.room._count.tasks,
   }));
 }
 

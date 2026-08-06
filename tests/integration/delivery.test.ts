@@ -55,7 +55,7 @@ describe("branch naming + reviewed-file parsing (pure)", () => {
 
 describe.skipIf(!hasDb)("draft PR delivery (integration)", () => {
   let roomId = "";
-  let ticketId = "";
+  let taskId = "";
   let ownerId = "";
 
   beforeAll(async () => {
@@ -72,10 +72,10 @@ describe.skipIf(!hasDb)("draft PR delivery (integration)", () => {
       },
     });
     roomId = room.id;
-    const ticket = await prisma.ticket.create({
+    const task = await prisma.agentTask.create({
       data: { roomId, title: "Ship it", createdById: owner.id, position: 1000 },
     });
-    ticketId = ticket.id;
+    taskId = task.id;
   });
 
   afterAll(async () => {
@@ -85,19 +85,19 @@ describe.skipIf(!hasDb)("draft PR delivery (integration)", () => {
   });
 
   beforeEach(async () => {
-    await prisma.agentRun.deleteMany({ where: { ticketId } });
+    await prisma.agentRun.deleteMany({ where: { taskId } });
   });
 
   async function succeededRunWithDiff() {
     const run = await createAgentRun({
       roomId,
-      ticketId,
+      taskId,
       requestedById: ownerId,
-      targetRepositoryKey: "agentguard-demo",
+      targetRepositoryKey: "demo-service",
     });
     await prisma.agentRun.update({
       where: { id: run.id },
-      data: { status: "SUCCEEDED", activeTicketId: null, finishedAt: new Date() },
+      data: { status: "SUCCEEDED", activeTaskId: null, finishedAt: new Date() },
     });
     await prisma.runArtifact.create({
       data: {
@@ -133,9 +133,9 @@ describe.skipIf(!hasDb)("draft PR delivery (integration)", () => {
   it("is refused for a run that has not succeeded", async () => {
     const run = await createAgentRun({
       roomId,
-      ticketId,
+      taskId,
       requestedById: ownerId,
-      targetRepositoryKey: "agentguard-demo",
+      targetRepositoryKey: "demo-service",
     });
     await prisma.agentRun.update({
       where: { id: run.id },

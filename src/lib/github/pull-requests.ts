@@ -25,7 +25,7 @@ import type { PullRequestDTO } from "@/lib/agent/types";
  * Safety properties, by construction:
  *  - only a SUCCEEDED run may ship;
  *  - the PR is always a DRAFT, never auto-merged;
- *  - work lands on a fresh `devroom/<ticket-slug>-<short-run-id>` branch cut
+ *  - work lands on a fresh `devroom/<task-slug>-<short-run-id>` branch cut
  *    from the configured base branch — never a direct commit to the default
  *    branch;
  *  - the content applied is the run's own reviewed DIFF artifact, not an
@@ -34,7 +34,7 @@ import type { PullRequestDTO } from "@/lib/agent/types";
  *    returns the existing link instead of opening a second PR.
  */
 
-function slugifyTicket(title: string): string {
+function slugifyTask(title: string): string {
   const base = title
     .toLowerCase()
     .trim()
@@ -44,9 +44,9 @@ function slugifyTicket(title: string): string {
   return base || "task";
 }
 
-export function buildBranchName(ticketTitle: string, runId: string): string {
+export function buildBranchName(taskTitle: string, runId: string): string {
   const shortRun = runId.slice(-8);
-  return assertSafeBranch(`devroom/${slugifyTicket(ticketTitle)}-${shortRun}`);
+  return assertSafeBranch(`devroom/${slugifyTask(taskTitle)}-${shortRun}`);
 }
 
 export function toPullRequestDTO(link: {
@@ -107,7 +107,7 @@ export async function createDraftPrForRun(params: {
   const run = await prisma.agentRun.findUnique({
     where: { id: params.runId },
     include: {
-      ticket: { select: { title: true, description: true } },
+      task: { select: { title: true, description: true } },
       artifacts: { where: { type: "DIFF" }, orderBy: { sequence: "desc" }, take: 1 },
     },
   });
@@ -154,7 +154,7 @@ export async function createDraftPrForRun(params: {
   const owner = assertSafeRepoIdentifier(connection.owner, "repository owner");
   const repo = assertSafeRepoIdentifier(connection.repo, "repository name");
   const baseBranch = assertSafeBranch(connection.defaultBranch);
-  const headBranch = buildBranchName(run.ticket.title, run.id);
+  const headBranch = buildBranchName(run.task.title, run.id);
 
   // Cut the branch from the CURRENT base head. The run's own baseRevision is
   // recorded on the PR body for reviewers, since the sandbox snapshot may be
@@ -182,17 +182,17 @@ export async function createDraftPrForRun(params: {
       path: file.path,
       branch: headBranch,
       content: file.content,
-      message: `Dev Room: update ${file.path}`,
+      message: `Agent Dev Room: update ${file.path}`,
       sha: existingSha ?? undefined,
     });
   }
 
-  const title = params.title?.trim() || `Dev Room: ${run.ticket.title}`;
+  const title = params.title?.trim() || `Agent Dev Room: ${run.task.title}`;
   const body = [
-    params.description?.trim() || run.ticket.description?.trim() || "",
+    params.description?.trim() || run.task.description?.trim() || "",
     "",
     "---",
-    `Prepared by Dev Room agent \`${run.agentId}\` from an approved plan.`,
+    `Prepared by Agent Dev Room agent \`${run.agentId}\` from an approved plan.`,
     run.baseRevision
       ? `Sandbox base revision: \`${run.baseRevision.slice(0, 10)}\``
       : "",

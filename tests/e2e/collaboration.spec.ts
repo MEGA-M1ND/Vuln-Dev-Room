@@ -4,7 +4,7 @@ import { test, expect, type BrowserContext, type Page } from "@playwright/test";
  * Two-browser collaboration flow.
  *
  * This exercises the real product: two authenticated users in the same room,
- * board updates propagating, selected-ticket presence, and realtime comments.
+ * board updates propagating, selected-task presence, and realtime comments.
  *
  * REQUIREMENTS to run meaningfully:
  *   - App running (Playwright starts `npm run dev` via webServer config).
@@ -30,7 +30,7 @@ async function signIn(page: Page, email: string, name: string) {
 
 async function openSeedRoom(page: Page): Promise<string> {
   await page.goto("/rooms");
-  const firstRoom = page.getByRole("link", { name: /AgentGuard Development/i });
+  const firstRoom = page.getByRole("link", { name: /Payments Platform/i });
   await firstRoom.first().click();
   await page.waitForURL(/\/rooms\/.+/);
   return page.url();
@@ -52,14 +52,14 @@ test("two users share a room, board, presence and comments", async ({
   const roomUrl = await openSeedRoom(pageA);
   await pageB.goto(roomUrl);
 
-  await expect(pageA.getByRole("heading", { name: "AgentGuard Development" })).toBeVisible();
-  await expect(pageB.getByRole("heading", { name: "AgentGuard Development" })).toBeVisible();
+  await expect(pageA.getByRole("heading", { name: "Payments Platform" })).toBeVisible();
+  await expect(pageB.getByRole("heading", { name: "Payments Platform" })).toBeVisible();
 
-  // 4. User A creates a ticket.
-  const title = `E2E ticket ${Date.now()}`;
-  await pageA.getByRole("button", { name: "+ New ticket" }).click();
+  // 4. User A creates a task.
+  const title = `E2E task ${Date.now()}`;
+  await pageA.getByRole("button", { name: "+ New task" }).click();
   await pageA.getByLabel("Title").fill(title);
-  await pageA.getByRole("button", { name: "Create ticket" }).click();
+  await pageA.getByRole("button", { name: "Create task" }).click();
   await expect(pageA.getByText(title)).toBeVisible();
 
   if (!realtime) {
@@ -76,16 +76,16 @@ test("two users share a room, board, presence and comments", async ({
   // 5. User B sees the board update without a manual refresh.
   await expect(pageB.getByText(title)).toBeVisible({ timeout: 15_000 });
 
-  // 6. User B selects the ticket.
-  await pageB.getByRole("button", { name: `Open ticket: ${title}` }).click();
+  // 6. User B selects the task.
+  await pageB.getByRole("button", { name: `Open task: ${title}` }).click();
 
-  // 7. User A sees User B as a viewer of that ticket.
+  // 7. User A sees User B as a viewer of that task.
   await expect(
     pageA.getByLabel(/viewing:.*Priya/i).first(),
   ).toBeVisible({ timeout: 15_000 });
 
   // 8. User B posts a comment.
-  await pageA.getByRole("button", { name: `Open ticket: ${title}` }).click();
+  await pageA.getByRole("button", { name: `Open task: ${title}` }).click();
   const comment = `Hello from Priya ${Date.now()}`;
   const composer = pageB.locator(".lb-composer-editor").first();
   await composer.click();

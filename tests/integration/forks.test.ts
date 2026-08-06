@@ -12,7 +12,7 @@ import { ApiError } from "@/lib/api/errors";
 // unlike requestCancel/requestRedirect/handoffRun, forking cannot avoid that
 // call. Mocking it (and having the mock perform the same DB write the real
 // runtime would) keeps the test deterministic while still exercising forkRun's
-// real transaction, ticket clone, and failure-handling logic against Postgres.
+// real transaction, task clone, and failure-handling logic against Postgres.
 vi.mock("@/lib/agent/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/agent/client")>();
   return { ...actual, forkAgentRun: vi.fn() };
@@ -28,7 +28,7 @@ const suffix = `fork-${Date.now()}`;
 
 describe.skipIf(!hasDb)("Fork a run (roadmap Phase 4, integration)", () => {
   let roomId = "";
-  let ticketId = "";
+  let taskId = "";
   let ownerId = "";
   let engineerId = "";
 
@@ -56,16 +56,16 @@ describe.skipIf(!hasDb)("Fork a run (roadmap Phase 4, integration)", () => {
       },
     });
     roomId = room.id;
-    const ticket = await prisma.ticket.create({
+    const task = await prisma.agentTask.create({
       data: {
         roomId,
-        title: "Source ticket",
+        title: "Source task",
         description: "Original description",
         createdById: owner.id,
         position: 1000,
       },
     });
-    ticketId = ticket.id;
+    taskId = task.id;
   });
 
   afterAll(async () => {
@@ -75,16 +75,16 @@ describe.skipIf(!hasDb)("Fork a run (roadmap Phase 4, integration)", () => {
   });
 
   beforeEach(async () => {
-    await prisma.agentRun.deleteMany({ where: { ticketId } });
+    await prisma.agentRun.deleteMany({ where: { taskId } });
     mockForkAgentRun.mockReset();
   });
 
   async function freshRun() {
     return createAgentRun({
       roomId,
-      ticketId,
+      taskId,
       requestedById: ownerId,
-      targetRepositoryKey: "agentguard-demo",
+      targetRepositoryKey: "demo-service",
     });
   }
 
@@ -116,7 +116,7 @@ describe.skipIf(!hasDb)("Fork a run (roadmap Phase 4, integration)", () => {
 
   // --- success path ----------------------------------------------------------
 
-  it("clones the ticket onto a new run that reaches the gate", async () => {
+  it("clones the task onto a new run that reaches the gate", async () => {
     const source = await freshRun();
     const sourceLastEvent = await prisma.runEvent.findFirst({
       where: { runId: source.id },
@@ -143,31 +143,31 @@ describe.skipIf(!hasDb)("Fork a run (roadmap Phase 4, integration)", () => {
     expect(mockForkAgentRun).toHaveBeenCalledWith(fork.id, source.id);
     expect(fork.status).toBe("AWAITING_APPROVAL");
     expect(fork.parentRunId).toBe(source.id);
-    expect(fork.ticketId).not.toBe(source.ticketId);
+    expect(fork.taskId).not.toBe(source.taskId);
 
-    // The fork lives on its own cloned ticket, never the parent's.
-    const forkTicket = await prisma.ticket.findUniqueOrThrow({
-      where: { id: fork.ticketId },
+    // The fork lives on its own cloned task, never the parent's.
+    const forkTask = await prisma.agentTask.findUniqueOrThrow({
+      where: { id: fork.taskId },
     });
-    expect(forkTicket.title).toBe("Source ticket (fork)");
-    expect(forkTicket.description).toBe("Original description");
-    expect(forkTicket.roomId).toBe(roomId);
+    expect(forkTask.title).toBe("Source task (fork)");
+    expect(forkTask.description).toBe("Original description");
+    expect(forkTask.roomId).toBe(roomId);
 
     const forkRow = await prisma.agentRun.findUniqueOrThrow({
       where: { id: fork.id },
     });
-    expect(forkRow.activeTicketId).toBe(fork.ticketId);
+    expect(forkRow.activeTaskId).toBe(fork.taskId);
     expect(forkRow.forkedAtEvent).toBe(sourceLastEvent?.id ?? null);
     expect(forkRow.baseRevision).toBe("abc123def");
     expect(forkRow.requestedById).toBe(engineerId);
     expect(forkRow.ownerUserId).toBe(engineerId);
 
-    // The source run and its own ticket are completely untouched.
+    // The source run and its own task are completely untouched.
     const sourceAfter = await prisma.agentRun.findUniqueOrThrow({
       where: { id: source.id },
     });
     expect(sourceAfter.status).toBe("AWAITING_APPROVAL");
-    expect(sourceAfter.activeTicketId).toBe(ticketId);
+    expect(sourceAfter.activeTaskId).toBe(taskId);
 
     const events = await prisma.runEvent.findMany({ where: { runId: fork.id } });
     expect(events.map((e) => e.type)).toContain("RUN_CREATED");
@@ -188,13 +188,13 @@ describe.skipIf(!hasDb)("Fork a run (roadmap Phase 4, integration)", () => {
     const forkRow = await prisma.agentRun.findFirstOrThrow({
       where: { parentRunId: source.id },
     });
-    // The ticket's active-run slot must not stay wedged by a run that never
+    // The task's active-run slot must not stay wedged by a run that never
     // started, mirroring createAgentRun's own unreachable-runtime handling.
     expect(forkRow.status).toBe("FAILED");
     expect(forkRow.errorCode).toBe("RUNTIME_UNAVAILABLE");
-    expect(forkRow.activeTicketId).toBeNull();
+    expect(forkRow.activeTaskId).toBeNull();
     // But the clone itself — the part forkRun controls directly — is intact.
     expect(forkRow.parentRunId).toBe(source.id);
-    expect(forkRow.ticketId).not.toBe(source.ticketId);
+    expect(forkRow.taskId).not.toBe(source.taskId);
   });
 });

@@ -32,7 +32,7 @@ def demo_repo():
 
 @pytest.fixture
 def deps_repo():
-    """agentguard-demo's counterpart WITH a requirements.txt — exercises the
+    """demo-service's counterpart WITH a requirements.txt — exercises the
     setup phase, unlike demo_repo which never triggers one."""
     repo = build_demo_repo(template="deps-demo")
     yield repo
@@ -90,7 +90,7 @@ def test_prepare_rejects_non_git_dir(docker_required, tmp_path):
 
 
 def test_no_manifest_skips_setup_phase(docker_required, demo_repo):
-    """agentguard-demo has no requirements.txt/pyproject.toml — behaviour must
+    """demo-service has no requirements.txt/pyproject.toml — behaviour must
     be byte-for-byte what it was before Phase 1a."""
     settings = get_settings()
     sb = DockerSandbox(settings)

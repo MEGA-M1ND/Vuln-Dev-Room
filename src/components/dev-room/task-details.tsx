@@ -11,47 +11,47 @@ import {
   PRIORITY_LABELS,
   PRIORITY_STYLES,
   STATUS_LABELS,
-} from "@/components/dev-room/ticket-meta";
-import { TicketDialog } from "@/components/dev-room/ticket-dialog";
-import { TicketComments } from "@/components/dev-room/ticket-comments";
+} from "@/components/dev-room/task-meta";
+import { AgentTaskDialog } from "@/components/dev-room/task-dialog";
+import { AgentTaskComments } from "@/components/dev-room/task-comments";
 import { AgentRunPanel } from "@/components/dev-room/agent-run-panel";
-import { TicketViewers } from "@/components/dev-room/ticket-viewers";
+import { AgentTaskViewers } from "@/components/dev-room/task-viewers";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export function TicketDetails({
+export function AgentTaskDetails({
   realtimeEnabled,
 }: {
   realtimeEnabled: boolean;
 }) {
-  const { selectedTicket, role, deleteTicket, refetch, selectTicket } =
+  const { selectedTask, role, deleteTask, refetch, selectTask } =
     useBoard();
   const { enabled } = usePresence();
   const [editing, setEditing] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [tab, setTab] = React.useState<"details" | "discussion">("details");
 
-  if (!selectedTicket) {
+  if (!selectedTask) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
-        Select a ticket to view its details and discussion.
+        Select a task to view its details and discussion.
       </div>
     );
   }
 
-  const ticket = selectedTicket;
-  const canEdit = can(role, "ticket:edit");
-  const canDelete = can(role, "ticket:delete");
+  const task = selectedTask;
+  const canEdit = can(role, "task:edit");
+  const canDelete = can(role, "task:delete");
 
   async function onDelete() {
-    if (!window.confirm(`Delete “${ticket.title}”? This cannot be undone.`))
+    if (!window.confirm(`Delete “${task.title}”? This cannot be undone.`))
       return;
     setDeleting(true);
     try {
-      await deleteTicket(ticket.id, ticket.version);
-      selectTicket(null);
+      await deleteTask(task.id, task.version);
+      selectTask(null);
     } catch (err) {
       await refetch();
       if (err instanceof ApiClientError) {
@@ -66,7 +66,7 @@ export function TicketDetails({
     <div className="flex flex-col">
       <div className="border-b border-border p-4">
         <div className="flex items-start justify-between gap-2">
-          <h2 className="text-base font-semibold">{ticket.title}</h2>
+          <h2 className="text-base font-semibold">{task.title}</h2>
           <div className="flex gap-1">
             {canEdit ? (
               <Button
@@ -91,10 +91,10 @@ export function TicketDetails({
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Badge>{STATUS_LABELS[ticket.status]}</Badge>
-          <Badge className={cn("gap-1", PRIORITY_STYLES[ticket.priority])}>
-            <span aria-hidden="true">{PRIORITY_GLYPH[ticket.priority]}</span>
-            {PRIORITY_LABELS[ticket.priority]} priority
+          <Badge>{STATUS_LABELS[task.status]}</Badge>
+          <Badge className={cn("gap-1", PRIORITY_STYLES[task.priority])}>
+            <span aria-hidden="true">{PRIORITY_GLYPH[task.priority]}</span>
+            {PRIORITY_LABELS[task.priority]} priority
           </Badge>
         </div>
 
@@ -102,15 +102,15 @@ export function TicketDetails({
           <div className="flex items-center justify-between">
             <dt className="text-muted-foreground">Assignee</dt>
             <dd>
-              {ticket.assignee ? (
+              {task.assignee ? (
                 <span className="flex items-center gap-2">
                   <Avatar
-                    name={ticket.assignee.name}
-                    id={ticket.assignee.id}
-                    image={ticket.assignee.image}
+                    name={task.assignee.name}
+                    id={task.assignee.id}
+                    image={task.assignee.image}
                     size={22}
                   />
-                  {ticket.assignee.name}
+                  {task.assignee.name}
                 </span>
               ) : (
                 <span className="text-muted-foreground">Unassigned</span>
@@ -121,30 +121,30 @@ export function TicketDetails({
             <dt className="text-muted-foreground">Created by</dt>
             <dd className="flex items-center gap-2">
               <Avatar
-                name={ticket.createdBy.name}
-                id={ticket.createdBy.id}
-                image={ticket.createdBy.image}
+                name={task.createdBy.name}
+                id={task.createdBy.id}
+                image={task.createdBy.image}
                 size={22}
               />
-              {ticket.createdBy.name}
+              {task.createdBy.name}
             </dd>
           </div>
           <div className="flex items-center justify-between">
             <dt className="text-muted-foreground">Created</dt>
-            <dd>{new Date(ticket.createdAt).toLocaleString()}</dd>
+            <dd>{new Date(task.createdAt).toLocaleString()}</dd>
           </div>
         </dl>
 
         {realtimeEnabled ? (
           <div className="mt-3">
-            <TicketViewers ticketId={ticket.id} />
+            <AgentTaskViewers taskId={task.id} />
           </div>
         ) : null}
       </div>
 
       <div
         role="tablist"
-        aria-label="Ticket sections"
+        aria-label="AgentTask sections"
         className="flex gap-1 border-b border-border px-4 pt-2"
       >
         <button
@@ -184,9 +184,9 @@ export function TicketDetails({
           <h3 className="text-sm font-semibold text-muted-foreground">
             Description
           </h3>
-          {ticket.description ? (
+          {task.description ? (
             <p className="mt-1 whitespace-pre-wrap text-sm">
-              {ticket.description}
+              {task.description}
             </p>
           ) : (
             <p className="mt-1 text-sm text-muted-foreground">
@@ -199,13 +199,13 @@ export function TicketDetails({
           <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
             Coding agent
           </h3>
-          <AgentRunPanel key={ticket.id} ticketId={ticket.id} />
+          <AgentRunPanel key={task.id} taskId={task.id} />
         </div>
       </div>
 
       <div className={cn("p-4", tab === "discussion" ? undefined : "hidden")}>
         {enabled ? (
-          <TicketComments ticketId={ticket.id} />
+          <AgentTaskComments taskId={task.id} />
         ) : (
           <p className="text-sm text-muted-foreground">
             Realtime comments require Liveblocks configuration. Add
@@ -216,9 +216,9 @@ export function TicketDetails({
         )}
       </div>
 
-      <TicketDialog
+      <AgentTaskDialog
         mode="edit"
-        ticket={ticket}
+        task={task}
         open={editing}
         onClose={() => setEditing(false)}
       />

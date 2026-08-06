@@ -10,7 +10,7 @@ type Params = { params: Promise<{ runId: string }> };
 /**
  * POST /api/runs/[runId]/fork — branch a run waiting at the approval gate
  * (OWNER/ENGINEER). `runId` is the SOURCE run being forked; the new run is
- * created on its own cloned ticket (see forkRun) and reported back here.
+ * created on its own cloned task (see forkRun) and reported back here.
  */
 export async function POST(_req: NextRequest, { params }: Params) {
   try {
