@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual re-run lever. Without this, a run that GitHub never dispatched (or
+  # one that failed for an infrastructure reason rather than a code one) can
+  # only be retried by pushing a commit, which means polluting a branch's
+  # history with an empty commit to ask a question about the code that is
+  # already there.
+  workflow_dispatch:
 
 # A newer push to the same branch supersedes an in-flight run.
 concurrency:
