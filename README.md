@@ -289,6 +289,44 @@ requests return the existing PR.
 
 ---
 
+## 8b. Connecting your own coding agent (adapter integration)
+
+Agent Dev Room is not limited to its built-in agent. Any coding agent — Claude
+Code, Codex, Cursor, or a script you wrote — can publish what it is doing into a
+room through one documented HTTP contract:
+
+```
+POST /api/agent-events
+X-Ingest-Token: <DEVROOM_INGEST_TOKEN>
+
+{ "taskId": "…", "eventType": "test_completed",
+  "agent": { "provider": "claude_code", "sessionId": "session_abc" },
+  "payload": { "command": "npm test", "status": "failed" } }
+```
+
+Adapters never touch the database and never learn internal run ids: events are
+keyed on `(taskId, agent.sessionId)`, and the run is created on the session's
+first event. Delivery is **idempotent** (retries are safe by construction) and
+**ordering is server-assigned**, so out-of-order or concurrent delivery still
+produces a coherent timeline. External and built-in agents then render through
+exactly the same work packet.
+
+An adapter can never claim success or push past the human approval gate — the
+contract's reportable statuses deliberately exclude it, and a late delivery can
+never overwrite an outcome a human already recorded.
+
+Try it with no agent and no credentials:
+
+```bash
+export DEVROOM_INGEST_TOKEN=local-dev-ingest-token   # match the server's value
+npx tsx scripts/emit-sample-agent-events.ts <taskId>
+```
+
+Full reference: **[`docs/agent-event-contract.md`](docs/agent-event-contract.md)**.
+Machine-readable schema: `src/contracts/agent-events.ts`.
+
+---
+
 ## 9. Environment variables
 
 | Variable | Required | Purpose |
@@ -305,7 +343,8 @@ requests return the existing PR.
 | `DEVROOM_GITHUB_ENABLED` | Optional | Master switch for GitHub delivery |
 | `GITHUB_TOKEN` | Optional | **Local dev only** credential |
 | `GITHUB_API_BASE_URL` | Optional | GitHub Enterprise override |
-| `DEVROOM_DEMO_MODE` | Optional | "Create sample ticket" button |
+| `DEVROOM_INGEST_TOKEN` | Optional | Token external agent adapters use for `POST /api/agent-events`. Deliberately separate from the runtime service token |
+| `DEVROOM_DEMO_MODE` | Optional | "Create sample task" button |
 
 Runtime-side (`services/agent-runtime/.env`): `DEVROOM_SANDBOX_IMAGE`,
 `DEVROOM_SANDBOX_MEMORY/CPUS/PIDS_LIMIT/TIMEOUT`, `DEVROOM_MODEL_PROVIDER`,

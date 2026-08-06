@@ -92,6 +92,19 @@ const EVENT_LABEL: Record<string, string> = {
   RUN_STEERED: "Steered mid-run — re-planning with new guidance",
   REVIEW_REQUESTED: "Review requested",
   REVIEW_POSTED: "Review posted",
+  // Reported by an external agent adapter via the ingestion contract.
+  AGENT_STARTED: "Agent started",
+  AGENT_PROGRESS: "Agent progress",
+  COMMAND_EXECUTED: "Command executed",
+  ERROR_DETECTED: "Error detected",
+  DECISION_RECORDED: "Decision recorded",
+  HANDOFF_REQUESTED: "Handoff requested",
+  RISK_FLAGGED: "Risk flagged",
+  PR_LINKED: "Pull request linked",
+  PR_UPDATED: "Pull request updated",
+  REVIEW_READY: "Ready for review",
+  RUN_MERGED: "Merged",
+  RUN_ABANDONED: "Abandoned",
 };
 
 // TOOL_CALL events carry {tool, args} in payloadJson; show what the agent is

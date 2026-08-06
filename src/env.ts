@@ -66,6 +66,13 @@ const serverSchema = z.object({
   // GITHUB_TOKEN and GITHUB_API_BASE_URL are deliberately NOT validated here —
   // see validateGithubToken()/validateGithubApiBaseUrl() below.
 
+  // --- Agent Dev Room pivot: external agent-event ingestion ---
+  // A DEDICATED token, deliberately not DEVROOM_AGENT_SERVICE_TOKEN: that one
+  // authenticates our own runtime and would let any third-party adapter we
+  // hand it to impersonate the runtime's privileged callbacks. Unset means
+  // ingestion is simply not configured, and the endpoint says so.
+  DEVROOM_INGEST_TOKEN: z.string().trim().optional().default(""),
+
   // --- MVP Phase 6: demo affordances (never on in production) ---
   DEVROOM_DEMO_MODE: z
     .string()
@@ -172,6 +179,13 @@ export const isAgentRuntimeConfigured =
  */
 export const isGitHubConfigured =
   env.DEVROOM_GITHUB_ENABLED === true && env.GITHUB_TOKEN.length > 0;
+
+/**
+ * External agent adapters can publish events only when a dedicated ingestion
+ * token is configured. Absent it the endpoint returns a clear "not configured"
+ * response rather than silently accepting unauthenticated writes.
+ */
+export const isAgentIngestConfigured = env.DEVROOM_INGEST_TOKEN.length > 0;
 
 /** Demo-only affordances (e.g. sample task seeding). Never in production. */
 export const isDemoMode =

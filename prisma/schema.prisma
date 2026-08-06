@@ -116,6 +116,20 @@ enum RunEventType {
   // Phase 5: reviewer-agent posted a structured review of another run.
   REVIEW_REQUESTED
   REVIEW_POSTED
+  // --- Agent Dev Room pivot: reported by external agent adapters through
+  // the ingestion contract. Appended, never reordered.
+  AGENT_STARTED
+  AGENT_PROGRESS
+  COMMAND_EXECUTED
+  ERROR_DETECTED
+  DECISION_RECORDED
+  HANDOFF_REQUESTED
+  RISK_FLAGGED
+  PR_LINKED
+  PR_UPDATED
+  REVIEW_READY
+  RUN_MERGED
+  RUN_ABANDONED
 }
 
 /// What kind of human intervention was recorded against a run.
@@ -287,6 +301,11 @@ model AgentRun {
   // diverge, and by the time a review can start (source status SUCCEEDED) the
   // task's active-run slot is already free.
   reviewedRunId       String?
+  // The external agent session this run represents (Agent Dev Room pivot).
+  // Null for the built-in runtime, whose session identity is graphThreadId.
+  // Ingestion resolves (taskId, agentSessionId) to a run so an adapter can
+  // publish a whole session's events without tracking our run ids.
+  agentSessionId      String?
   // Bumped on every status change (a lightweight change token for polling).
   runVersion          Int            @default(1)
   createdAt           DateTime       @default(now())
@@ -324,6 +343,7 @@ model AgentRun {
   @@index([ownerUserId])
   @@index([parentRunId])
   @@index([reviewedRunId])
+  @@index([taskId, agentSessionId])
 }
 
 /// An auditable human intervention against a run (redirect, hand-off, cancel).
@@ -478,10 +498,16 @@ model RunEvent {
   actorType   String       @default("agent")
   actorId     String?
   payloadJson Json?
+  // Ingestion idempotency (Agent Dev Room pivot). Set only for events that
+  // arrived from an external agent adapter; the built-in runtime writes
+  // directly and leaves this null. Unique per run, so replaying a delivery is
+  // a no-op rather than a duplicate timeline entry.
+  externalEventId String?
   createdAt   DateTime     @default(now())
 
   run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@unique([runId, sequence])
+  @@unique([runId, externalEventId])
   @@index([runId])
 }
