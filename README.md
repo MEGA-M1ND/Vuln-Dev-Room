@@ -325,6 +325,20 @@ npx tsx scripts/emit-sample-agent-events.ts <taskId>
 Full reference: **[`docs/agent-event-contract.md`](docs/agent-event-contract.md)**.
 Machine-readable schema: `src/contracts/agent-events.ts`.
 
+### A working adapter: Claude Code
+
+[`adapters/claude-code/`](adapters/claude-code/) is a real, zero-dependency
+adapter built on Claude Code's own hooks — no wrapper process. Export three
+environment variables, paste a `hooks` block into `.claude/settings.json`, and
+a Claude Code session shows up in the room's control room as it works.
+
+It never sends file contents, redacts credentials out of commands before they
+leave the machine, makes paths repo-relative, and never claims success. It also
+cannot break your coding session: every failure path exits 0 silently within
+3 seconds.
+
+See [`adapters/claude-code/README.md`](adapters/claude-code/README.md).
+
 ---
 
 ## 8c. The control room

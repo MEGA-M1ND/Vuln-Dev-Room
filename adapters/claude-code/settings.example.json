@@ -1,0 +1,66 @@
+{
+  "_comment": "Merge the `hooks` block below into your project's .claude/settings.json (or ~/.claude/settings.json). Adjust the path to devroom-hook.mjs. Safe to commit: with DEVROOM_TASK_ID / DEVROOM_URL / DEVROOM_INGEST_TOKEN unset the hook exits silently, so teammates who have not opted in are unaffected.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./adapters/claude-code/devroom-hook.mjs"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./adapters/claude-code/devroom-hook.mjs"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./adapters/claude-code/devroom-hook.mjs"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./adapters/claude-code/devroom-hook.mjs"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./adapters/claude-code/devroom-hook.mjs"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./adapters/claude-code/devroom-hook.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}
