@@ -36,3 +36,7 @@ yarn-debug.log*
 yarn-error.log*
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# Playwright artifacts
+/test-results/
+/playwright-report/

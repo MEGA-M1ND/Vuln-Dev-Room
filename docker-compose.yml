@@ -1,0 +1,37 @@
+# Local development dependencies for AgentGuard Control Room.
+#
+# Postgres only. Redis is deliberately absent: nothing in V1 requires it, and a
+# dependency you can start without is a dependency a new contributor does not
+# have to debug on their first afternoon.
+#
+#   docker compose up -d
+#   npm run db:deploy && npm run db:seed && npm run dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agentguard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: devroom
+      POSTGRES_PASSWORD: devroom
+      POSTGRES_DB: devroom
+      # Faster startup for a throwaway dev database; never use in production.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      # Bound to loopback so a laptop on a shared network does not expose an
+      # unauthenticated database to it.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - agentguard-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Depending services wait for readiness rather than for the container to
+      # merely exist — Postgres accepts connections several seconds after start.
+      test: ["CMD-SHELL", "pg_isready -U devroom -d devroom"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  agentguard-pgdata:
