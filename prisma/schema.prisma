@@ -72,6 +72,15 @@ enum AgentRunStatus {
   // Deliberately dropped without merging — distinct from FAILED, which means
   // the run itself broke.
   ABANDONED
+  // --- AgentGuard Control Room. Appended, never reordered.
+  // Created but not yet submitted; the requester is still editing it.
+  DRAFT
+  // Submitted, with the policy preflight being evaluated before execution.
+  PREFLIGHT
+  // A human suspended execution. Distinct from AWAITING_APPROVAL (blocked on a
+  // decision) and BLOCKED (blocked on an external dependency): this one resumes
+  // the moment someone presses resume, with nothing else required.
+  PAUSED
 }
 
 enum RunArtifactType {
@@ -135,6 +144,23 @@ enum RunEventType {
   REVIEW_READY
   RUN_MERGED
   RUN_ABANDONED
+  // --- AgentGuard Control Room. Appended, never reordered.
+  // A governed action was checked against the policy set and permitted. Logged
+  // for allowed actions too: a trail that records only refusals cannot show
+  // that anything was ever checked.
+  POLICY_EVALUATED
+  // A governed action was refused outright.
+  POLICY_DENIED
+  // An approval gate was resolved.
+  APPROVAL_GRANTED
+  APPROVAL_REJECTED
+  // Human pause/resume of a live run.
+  RUN_PAUSED
+  RUN_RESUMED
+  // The evidence bundle was sealed at the end of the run.
+  EVIDENCE_FINALIZED
+  // The isolated workspace was torn down.
+  SANDBOX_DESTROYED
 }
 
 /// What kind of human intervention was recorded against a run.
