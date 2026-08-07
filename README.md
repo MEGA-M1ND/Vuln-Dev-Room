@@ -1,477 +1,532 @@
-# Agent Dev Room
+# AgentGuard Control Room
 
 [![CI](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml/badge.svg)](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-205%2F205-brightgreen)](https://github.com/MEGA-M1ND/Vuln-Dev-Room/actions/workflows/ci.yml)
 
-**Turn private AI coding sessions into work your engineering team can review,
-steer, hand off, and ship.** Your team watches, steers, approves, hands off and
-ships agent work together — instead of each engineer running an agent alone in
-a private terminal.
+**A governance and shared-visibility control plane for AI coding agents.**
 
-Built for lean teams (3–10 engineers) with a GitHub-native workflow. Not a Jira
-replacement, not an agent swarm dashboard, not a surveillance or
-productivity-scoring tool, and never an autonomous merge-to-main system.
+Submit agent work against a repository, watch it execute under explicit policy,
+approve it before anything is delivered, and keep a tamper-evident record of
+what happened.
 
-> **Note on the repository name.** The GitHub slug is still `Vuln-Dev-Room`, a
-> vestige of an earlier working title. There is no vulnerability-scanning or
-> remediation functionality in this codebase — see
-> [`docs/agent-dev-room-pivot-plan.md`](docs/agent-dev-room-pivot-plan.md) §0 for
-> the audit. Renaming the repository is a GitHub settings change the owner must
-> make; nothing in the code depends on the slug.
+Built for small engineering teams (3–10 people) with a GitHub-native workflow.
 
-## How we guarantee nothing is written without approval
-
-This is the property the whole product rests on, so it's stated up front
-rather than buried in an architecture doc:
-
-- The LangGraph state machine is compiled with `interrupt_before=["apply_edits"]`
-  — the graph physically cannot reach the node that writes a file until a
-  human calls the approve endpoint. There is no code path that skips it.
-- **A rejected or cancelled run at the gate has written nothing, provably.**
-  The sandbox used to inspect the repository is read-only up to that point;
-  the interrupt sits *before* the one node that ever calls `apply_patch`, so
-  a reject or cancel there tears the sandbox down having written zero bytes.
-- **A redirect invalidates the pending approval.** If new guidance arrives
-  while a plan is awaiting approval, that plan is discarded and the agent
-  re-plans from scratch — a stale approved plan can never be applied out from
-  under a human, even when the redirect and the approval race each other.
-- **The draft pull request carries the exact bytes a human reviewed** — the
-  run's `DIFF` artifact's recorded file contents, not a re-derivation from the
-  diff text or a fresh model call. If a run never recorded that artifact,
-  delivery refuses to open a PR rather than guess (`src/lib/github/diff.ts`).
-- **Self-hosted by default.** The agent runtime is a service you run — your
-  code is copied into a Docker container on infrastructure you control, and
-  it never leaves that container: `--network=none` during the isolated agent
-  phase, no bind mounts, no telemetry callout. For a team evaluating whether
-  to let an AI agent touch its codebase, "your source never leaves your own
-  infrastructure" is a real answer, not a compliance checkbox.
-
-Every claim above is exercised by an integration test, not just asserted —
-see [§10](#10-tests) for what actually runs in CI.
+> **On the repository name.** The GitHub slug is still `Vuln-Dev-Room`, a
+> vestige of an earlier working title. There is no vulnerability-scanning
+> functionality here. Renaming is a settings change the owner must make;
+> nothing in the code depends on the slug.
 
 ---
 
-## 1. What Dev Room is
+## The problem
 
-A developer files a ticket in a shared room. An owner or engineer starts a
-coding agent on it. **Everyone in the room sees the same run in real time** —
-its plan, its events, its outputs — and anyone with the right role can:
+Engineering teams are adopting coding agents fast, and almost all of that work
+happens invisibly inside one developer's terminal. That produces four concrete
+problems, none of which are solved by the agent getting smarter:
 
-- **approve** the plan before a single file is written,
-- **redirect** the agent with new guidance mid-flight,
-- **cancel** it safely,
-- **hand off** responsibility to a teammate,
-- review the real diff and test results,
-- open a **draft pull request**,
-- save a successful run as a reusable **playbook**.
+| Problem | What it looks like in practice |
+| --- | --- |
+| **Invisible** | Nobody but the operator knows what the agent read, changed, or ran. |
+| **Ungoverned** | Nothing structurally prevents an agent reading `.env`, force-pushing, or running a migration. "Be careful" is a prompt, not a control. |
+| **Unreviewable** | The diff arrives with no record of how it was reached, so review starts from zero. |
+| **Unauditable** | When something goes wrong, there is no trustworthy account of what the agent actually did. |
 
-Every intervention is durable and attributed, so the room keeps an honest
-record of what the agent did, who stepped in, and why.
+AgentGuard is the control plane around the agent, not another agent. It makes
+the work visible while it happens, applies policy *before* each action rather
+than after, requires a second human before anything is delivered, and produces
+an evidence bundle whose integrity can be checked.
 
-### What it is not
+### What this is not
 
-No automatic merges. No deploys. No agent swarms. No enterprise SSO/SAML/SCIM.
-No billing. No generic Slack/Linear/Jira integrations. One trustworthy,
-visible, controllable agent per ticket.
-
----
-
-## 2. Demo workflow
-
-The full loop, as a 3–10 person team would use it:
-
-1. **Two people join the same room.** Both appear in the presence bar.
-2. **Alice creates a ticket** — "Add rate-limit tests".
-3. **Alice starts `backend-agent`** (optionally from a saved playbook).
-4. The agent copies the configured repository into an isolated sandbox,
-   inspects it, and **stops before writing anything**, showing its plan.
-   Status: `AWAITING APPROVAL`.
-5. **Bob is watching** the same run live — timeline, plan, and "Alice and 1
-   other are watching".
-6. **Bob redirects it**: "keep the public API unchanged". The pending approval
-   is invalidated, the agent re-plans, and returns to the gate. Nothing has
-   been written.
-7. **Alice approves.** Only now does the agent edit files, run the project's
-   test suite, and capture a diff.
-8. The room reviews the **real diff and test output**.
-9. **Alice opens a draft PR** (if GitHub is configured). Never merged.
-10. **Alice saves the run as a playbook** so the next similar ticket starts
-    from a known-good approach.
-11. **Insights** shows success rate, redirect rate, run duration and playbook
-    reuse over 7d / 30d / all-time.
-
-Manual two-browser script: see [§10](#10-manual-two-browser-demo).
+- Not a Devin clone, and not an agent itself
+- Not a Jira replacement
+- **Not an autonomous merge-to-main system** — there is no merge call anywhere
+  in the codebase, and no UI or API path that could reach one
+- Not a multi-agent swarm dashboard
+- Not a productivity-surveillance tool
 
 ---
 
-## 3. Security model
+## Architecture
 
-The guarantees below are enforced in code and covered by tests.
+```mermaid
+flowchart TB
+    subgraph browser["Browser"]
+        UI["Control Room UI<br/>Next.js App Router · RSC"]
+        SSE(["EventSource<br/>live timeline"])
+    end
 
-**The browser never touches anything privileged.** No Docker, no filesystem
-paths, no agent service token, no GitHub credential, no model keys, no sandbox
-IDs. Run DTOs deliberately omit `sandboxId` and `graphThreadId`; tests assert
-this.
+    subgraph server["Next.js server — all secrets live here"]
+        API["Route handlers<br/>Zod-validated"]
+        PERM["Permission matrix<br/>Admin · Engineer · Reviewer"]
+        POL["Policy engine<br/>evaluate → allow / gate / deny"]
+        EXEC["Agent executor<br/>MockAgentExecutor (V1)"]
+        AUDIT["Audit chain<br/>SHA-256 linked events"]
+        EVID["Evidence builder<br/>+ integrity verifier"]
+    end
 
-**Agent execution is isolated.** Every run gets a short-lived Docker container:
-`--network=none`, non-root (uid 1000), `--read-only` root filesystem with a
-single writable tmpfs workspace, `--cap-drop=ALL`, `no-new-privileges`, and
-CPU / memory / PID / time limits. The repository is **copied in** — no bind
-mounts — so the host source is never modified. **There is no host-execution
-fallback**: if Docker is unavailable the run fails with `SANDBOX_UNAVAILABLE`.
+    subgraph data["PostgreSQL — single source of truth"]
+        RUNS[("AgentRun")]
+        EVENTS[("RunEvent<br/>append-only + hashes")]
+        DEC[("PolicyDecision")]
+        APPR[("ApprovalRequest<br/>ApprovalDecision")]
+        REP[("EvidenceReport")]
+    end
 
-**A human approves before any write.** The LangGraph graph is compiled with
-`interrupt_before=["apply_edits"]`. A rejected or cancelled run at the gate
-provably wrote nothing. A redirect *invalidates* a pending approval, so a stale
-approved plan can never be applied.
+    subgraph future["Deliberately not implemented in V1"]
+        SBX["SandboxProvider<br/>Docker · E2B"]
+        LLM["LLMProvider<br/>LangGraph orchestration"]
+        GH["GitHubProvider<br/>App installation tokens"]
+    end
 
-**Cancellation is cooperative.** Work stops between graph nodes, never
-mid-write, then the sandbox is destroyed.
+    UI --> API
+    SSE -.->|"replay-safe cursor"| API
+    API --> PERM --> POL
+    POL -->|"every governed action"| DEC
+    POL -->|"APPROVAL_REQUIRED"| APPR
+    EXEC -->|"asks before acting"| POL
+    EXEC --> AUDIT --> EVENTS
+    EXEC --> RUNS
+    APPR -->|"approved → resume"| EXEC
+    EVID --> REP
+    EVENTS -->|"verify chain"| EVID
 
-**Authorization is server-side**, centralized in `lib/permissions`, and
-enforced again on the runtime's internal endpoints. Non-members get `404` (not
-`403`) so room existence is never leaked.
+    EXEC -.->|"swap the mock"| SBX
+    EXEC -.-> LLM
+    API -.-> GH
 
-**Writes are Zod-validated** and return a consistent error envelope. Stack
-traces, filesystem paths, GitHub responses and credentials never reach the
-client.
-
-**Unconfigured integrations say so.** GitHub and Liveblocks are feature-flagged
-and degrade to clear UI states — nothing pretends to work.
-
-### Roles
-
-| Action | OWNER | ENGINEER | VIEWER |
-| --- | :-: | :-: | :-: |
-| Read room, watch runs, comment | ✅ | ✅ | ✅ |
-| Read playbooks | ✅ | ✅ | ✅ |
-| Create / edit / move tickets | ✅ | ✅ | ❌ |
-| Start, approve, redirect, cancel, hand off, fork runs | ✅ | ✅ | ❌ |
-| Create draft PRs, author playbooks | ✅ | ✅ | ❌ |
-| Delete tickets, update room, manage members | ✅ | ❌ | ❌ |
-
----
-
-## 4. Architecture
-
-```
-                    ┌─────────────────────────────────────────┐
-                    │              Browser                    │
-                    └───────┬──────────────────────┬──────────┘
-                            │ REST (authz'd)       │ WebSocket
-                            ▼                      ▼
-                 ┌────────────────────┐   ┌──────────────────────┐
-                 │     Next.js        │   │     Liveblocks       │
-                 │  authn/authz, API  │   │ presence, cursors,   │
-                 │  UI, Prisma        │   │ comments, RUN_UPDATED│
-                 └───┬────────────┬───┘   │  (ephemeral only)    │
-                     │            │       └──────────────────────┘
-       ┌─────────────┘            └───────────────┐
-       ▼                                          ▼
-┌──────────────┐   internal token   ┌───────────────────────────┐
-│  PostgreSQL  │◄───────────────────┤  Python agent-runtime     │
-│  (authority) │                    │  FastAPI + LangGraph      │
-│  rooms,      │                    └────────────┬──────────────┘
-│  tickets,    │                                 │ one per run
-│  runs,       │                    ┌────────────▼──────────────┐
-│  events,     │                    │  Docker sandbox           │
-│  playbooks   │                    │  --network=none, non-root │
-└──────────────┘                    │  read-only, cap-drop=ALL  │
-       ▲                            └───────────────────────────┘
-       │
-       └──── Next.js ──► GitHub REST API (ONLY when configured)
+    classDef futureStyle stroke-dasharray: 5 5
+    class SBX,LLM,GH futureStyle
 ```
 
-**PostgreSQL is the single source of truth.** Liveblocks carries only ephemeral
-awareness and lightweight invalidation signals — never durable state. LangGraph
-checkpoints live in a dedicated `langgraph` schema, isolated from app tables.
-
-```
-src/
-  app/api/            rooms, tickets, runs, playbooks, insights, internal callback
-  components/         dev-room/ (board, run panel, controls), playbooks/, insights/
-  lib/
-    agent/            run service, interventions, runtime client, DTOs
-    github/           server-only GitHub client + draft-PR flow
-    playbooks/        playbook recipes
-    insights/         metrics aggregation
-    permissions/      the authorization matrix
-services/agent-runtime/
-  app/graph/          LangGraph backend_agent (approval gate, re-plan, cancel)
-  app/sandbox/        Sandbox abstraction + Docker implementation
-  app/tools/          the six repository tools
-  app/security/       path allow-list, redaction, service auth
-```
+**The load-bearing arrow is `EXEC → POL`.** The policy check sits between the
+agent's intent and the action, not inside the agent's prompt. A prompt is a
+request; a policy is a control.
 
 ---
 
-## 5. Local setup
+## Features
 
-**Prerequisites:** Node ≥ 20, PostgreSQL ≥ 14, Python ≥ 3.11, Docker.
+### Governed execution
+- Three run modes — **Plan only**, **Verify pull request**, **Propose code
+  change** — each an outer bound on what the agent may attempt, fixed at
+  creation and not widenable mid-run
+- **Preflight panel** that runs the real rule set before the run is created and
+  states plainly what is allowed, what will pause, and what is refused
+- Policy evaluated before every governed action, with the decision persisted
+  whether it was allowed or not
+
+### Human control
+- **Approval gate** enforced in the executor and the database, not just the UI
+- **Self-approval is refused** — a requester cannot approve their own run, even
+  as an Admin
+- Pause, resume, and cancel a live run
+- A rejected gate ends the run; the agent does not get a second route to the
+  same action
+
+### Visibility
+- Live event timeline over Server-Sent Events, with colour-coded event families
+  (policy checks, tool calls, tests, approvals, delivery)
+- Dashboard with run status, policy outcomes, daily activity, and audit
+  integrity rate
+- Policy simulator that calls the same evaluation code the executor does
+
+### Accountability
+- **Tamper-evident audit chain**: every event hashed against its predecessor
+- **Evidence report** with metadata, policy decisions, tool calls, diff, tests,
+  approval history, and a live integrity verdict
+- JSON download and a print-friendly view for incident reviews and audit packets
+- `scripts/verify-chains.ts` for out-of-band verification
+
+---
+
+## Quick start
+
+**Prerequisites:** Node 20+, Docker (or a local PostgreSQL 16).
 
 ```bash
+git clone https://github.com/MEGA-M1ND/Vuln-Dev-Room.git
+cd Vuln-Dev-Room
 npm install
-cp .env.example .env          # set DATABASE_URL and AUTH_SECRET
-npm run db:migrate            # apply all migrations
-npm run db:seed               # demo room, users, tickets
+
+cp .env.example .env
+# Set AUTH_SECRET to any long random string:
+#   openssl rand -base64 32
+
+docker compose up -d          # PostgreSQL on 127.0.0.1:5432
+npm run db:deploy             # apply migrations
+npm run db:seed               # Astra Engineering demo data
+
 npm run dev                   # http://localhost:3000
 ```
 
-Sign in from the home page as a seeded user (Prasanna / Priya / Arun) or any
-email. Open a second browser to test collaboration.
+Sign in as any of the seeded users. **Approval requires two different people**,
+so you will need at least two of them:
 
-The board, tickets, comments and presence all work at this point. Agent runs
-additionally need the runtime (next section).
-
----
-
-## 6. Agent runtime & sandbox
-
-```bash
-cd services/agent-runtime
-uv venv .venv && source .venv/bin/activate   # or python -m venv .venv
-uv pip install -e '.[dev]'
-
-cp .env.example .env
-#  - DEVROOM_AGENT_SERVICE_TOKEN must match the web app's value
-#  - DATABASE_URL is the same database
-#  - DEVROOM_REPOSITORIES_JSON registers the demo repo (host path, never
-#    exposed to browsers)
-
-# Build the sandbox image (pick one):
-docker build -f docker/sandbox.Dockerfile -t devroom-sandbox:latest .
-# ...or, where Docker Hub is unreachable:
-./docker/build-offline-sandbox.sh devroom-sandbox:local
-
-set -a; . ./.env; set +a
-uvicorn app.main:app --host 127.0.0.1 --port 8787
-```
-
-See [`services/agent-runtime/README.md`](services/agent-runtime/README.md) for
-the tool list, sandbox flags and internal API.
+| Email | Role | Can do |
+| --- | --- | --- |
+| `maya.chen@astra.dev` | Admin | Everything, including managing policies |
+| `arjun.rao@astra.dev` | Engineer | Create, steer, pause, and cancel runs |
+| `priya.shah@astra.dev` | Reviewer | Resolve approval gates; cannot author work |
 
 ---
 
-## 7. Liveblocks (optional)
+## Demo script
 
-Presence, comments and instant run updates need free Liveblocks keys:
+Five minutes, no GitHub credentials required.
 
-1. Create a project at <https://liveblocks.io/dashboard>.
-2. Set `LIVEBLOCKS_SECRET_KEY` and `NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY`.
+1. **Sign in as Arjun Rao** (Engineer). The dashboard shows seeded history:
+   runs by status, policy outcomes, and pending approvals.
+2. **Runs → New run.** Pick `astra-engineering/payments-api`, title it
+   *"Refund endpoint is not idempotent"*, leave the mode on **Propose code
+   change**.
+   *Watch the preflight panel on the right.* Before anything runs it already
+   says: reading and testing are allowed, opening a pull request will require
+   approval, and reading secrets or deploying to production is denied outright.
+3. **Create and start run.** The control room opens and the timeline streams
+   live: sandbox prepared → plan → policy checks → file reads → edits → tests
+   pass 48/48 → diff captured.
+4. **The run stops at the gate.** Status becomes *Awaiting approval*. No pull
+   request exists. Try to approve it — you cannot: *"You started this run.
+   Approval requires a second person."*
+5. **Sign in as Priya Shah** (Reviewer) and open **Approvals**. The review card
+   shows the repository, branches, files changed, diff stat, test results, and
+   the rule that forced the gate. Approve with a comment.
+6. **The run resumes** and delivers a draft pull request (simulated in Demo
+   Mode).
+7. **Open the Evidence report.** *Audit trail verified*, the chain head hash,
+   every policy decision, the full timeline, and Priya's comment on the record.
+   Download the JSON.
+8. **Optional — prove the chain works.** Edit one event's payload directly in
+   Postgres, reload the report, and it turns into *Integrity check failed*
+   naming the exact event.
 
-Without them the app still works: the run panel **polls** instead, and presence
-UI is hidden with a clear notice.
-
----
-
-## 8. GitHub integration (optional)
-
-**Disabled by default.** Enable with both:
-
-```bash
-DEVROOM_GITHUB_ENABLED="true"
-GITHUB_TOKEN="ghp_..."        # local development only
-```
-
-Then, as an OWNER, connect a repository (`POST /api/rooms/[roomId]/repository`
-with `owner`, `repo`, `defaultBranch`).
-
-On a successful run, "Create draft PR" cuts `devroom/<ticket-slug>-<run-id>`
-from the base branch, applies the run's **reviewed file contents**, and opens a
-**draft** PR. It never merges and never commits to the default branch. Repeat
-requests return the existing PR.
-
-> **Production note:** `GITHUB_TOKEN` is a local-development path. For
-> production, use a GitHub App (`GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY`) and
-> mint short-lived installation tokens in `resolveCredential()`
-> (`src/lib/github/client.ts`), which is marked with a TODO. No home-grown
-> credential encryption is used on purpose.
+Try `npx tsx scripts/verify-chains.ts` at any point to verify every run's chain
+from the command line.
 
 ---
 
-## 8b. Connecting your own coding agent (adapter integration)
+## Environment variables
 
-Agent Dev Room is not limited to its built-in agent. Any coding agent — Claude
-Code, Codex, Cursor, or a script you wrote — can publish what it is doing into a
-room through one documented HTTP contract:
-
-```
-POST /api/agent-events
-X-Ingest-Token: <DEVROOM_INGEST_TOKEN>
-
-{ "taskId": "…", "eventType": "test_completed",
-  "agent": { "provider": "claude_code", "sessionId": "session_abc" },
-  "payload": { "command": "npm test", "status": "failed" } }
-```
-
-Adapters never touch the database and never learn internal run ids: events are
-keyed on `(taskId, agent.sessionId)`, and the run is created on the session's
-first event. Delivery is **idempotent** (retries are safe by construction) and
-**ordering is server-assigned**, so out-of-order or concurrent delivery still
-produces a coherent timeline. External and built-in agents then render through
-exactly the same work packet.
-
-An adapter can never claim success or push past the human approval gate — the
-contract's reportable statuses deliberately exclude it, and a late delivery can
-never overwrite an outcome a human already recorded.
-
-Try it with no agent and no credentials:
-
-```bash
-export DEVROOM_INGEST_TOKEN=local-dev-ingest-token   # match the server's value
-npx tsx scripts/emit-sample-agent-events.ts <taskId>
-```
-
-Full reference: **[`docs/agent-event-contract.md`](docs/agent-event-contract.md)**.
-Machine-readable schema: `src/contracts/agent-events.ts`.
-
-### A working adapter: Claude Code
-
-[`adapters/claude-code/`](adapters/claude-code/) is a real, zero-dependency
-adapter built on Claude Code's own hooks — no wrapper process. Export three
-environment variables, paste a `hooks` block into `.claude/settings.json`, and
-a Claude Code session shows up in the room's control room as it works.
-
-It never sends file contents, redacts credentials out of commands before they
-leave the machine, makes paths repo-relative, and never claims success. It also
-cannot break your coding session: every failure path exits 0 silently within
-3 seconds.
-
-See [`adapters/claude-code/README.md`](adapters/claude-code/README.md).
-
----
-
-## 8c. The control room
-
-`/rooms/[roomId]/control-room` answers one question across every agent working
-in the repository — built-in or external: **what is in flight, and what is
-waiting on a person?**
-
-- A **work queue** ordered by what needs a human first, not by recency, and
-  filterable by status, owner, agent, repository and risk. Tasks nothing has
-  picked up are included, because an untouched task is a gap worth seeing.
-- **Potential conflicts & risks** — the transparent heuristics described in
-  [`docs/risk-signals.md`](docs/risk-signals.md).
-- **Recent outcomes**, including the runs that did not land, **recent pull
-  requests**, and the room's shared **activity timeline**.
-
-It reports work, never people: no per-developer throughput, no ranking, no
-scoring. An owner is shown so you know who to ask.
-
-Full reference: **[`docs/control-room.md`](docs/control-room.md)**.
-
----
-
-## 9. Environment variables
+Only two are required. Everything else degrades to a clearly-labelled
+"not configured" state rather than failing.
 
 | Variable | Required | Purpose |
-| --- | :-: | --- |
-| `DATABASE_URL` | Yes | PostgreSQL connection |
-| `AUTH_SECRET` | Yes | Auth.js session signing |
-| `NEXTAUTH_URL` | Local | App base URL |
-| `DEV_AUTH_ENABLED` | Dev | Development sign-in switcher (never production) |
-| `LIVEBLOCKS_SECRET_KEY` | Optional | Presence, comments, realtime |
-| `NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY` | Optional | Client Liveblocks key |
-| `DEVROOM_AGENT_SERVICE_URL` | Agent | Runtime base URL |
-| `DEVROOM_AGENT_SERVICE_TOKEN` | Agent | Shared internal token (server-only) |
-| `DEVROOM_DEFAULT_REPOSITORY_KEY` | Agent | Default registry key |
-| `DEVROOM_GITHUB_ENABLED` | Optional | Master switch for GitHub delivery |
-| `GITHUB_TOKEN` | Optional | **Local dev only** credential |
-| `GITHUB_API_BASE_URL` | Optional | GitHub Enterprise override |
-| `DEVROOM_INGEST_TOKEN` | Optional | Token external agent adapters use for `POST /api/agent-events`. Deliberately separate from the runtime service token |
-| `DEVROOM_DEMO_MODE` | Optional | "Create sample task" button |
+| --- | --- | --- |
+| `DATABASE_URL` | **yes** | PostgreSQL connection string |
+| `AUTH_SECRET` | **yes** | Session signing key |
+| `DIRECT_URL` | no | Direct connection for migrations behind a pooler |
+| `NEXT_PUBLIC_APP_URL` | no | Absolute links in evidence reports |
+| `DEV_AUTH_ENABLED` | no | Development user switcher. **Ignored when `NODE_ENV=production`** |
+| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | no | GitHub OAuth sign-in |
+| `DEVROOM_GITHUB_ENABLED` | no | Turns on real GitHub delivery |
+| `GITHUB_TOKEN` | no | Server-side only; never sent to the browser |
+| `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_WEBHOOK_SECRET` | no | GitHub App flow (roadmap — see below) |
+| `LIVEBLOCKS_SECRET_KEY` | no | Multiplayer presence |
+| `DEVROOM_INGEST_TOKEN` | no | External agent adapters posting to `/api/agent-events` |
+| `DEVROOM_DEMO_MODE` | no | Extra demo affordances |
 
-Runtime-side (`services/agent-runtime/.env`): `DEVROOM_SANDBOX_IMAGE`,
-`DEVROOM_SANDBOX_MEMORY/CPUS/PIDS_LIMIT/TIMEOUT`, `DEVROOM_MODEL_PROVIDER`,
-`ANTHROPIC_API_KEY`, `DEVROOM_REPOSITORIES_JSON`, `DEVROOM_WEB_CALLBACK_URL`.
+See [`.env.example`](.env.example) — a test enforces that every variable the
+code reads is documented there.
 
-All secrets are server-only. Only `NEXT_PUBLIC_*` reaches the browser.
+### Demo Mode
+
+When no GitHub credentials are configured the app runs in **Demo Mode**, which
+is labelled in the sidebar and on the Repositories page. In Demo Mode:
+
+- repositories come from the seed rather than the GitHub API
+- agent execution is simulated by `MockAgentExecutor`
+- an approved pull request is recorded as a `SIMULATED` link with a
+  non-resolving `demo.agentguard.local` URL, deliberately not a `github.com`
+  one that might point at somebody's real PR
+
+**Everything else is real.** Policies are evaluated by the live rule set,
+approval gates block in the database, and the audit trail is hash-chained
+exactly as it would be against a real repository. The simulated part is the
+agent, not the control plane.
 
 ---
 
-## 10. Tests
+## Security model
 
-```bash
-npm run lint && npm run typecheck && npm test    # TypeScript
-npm run build
+| Control | How it is enforced |
+| --- | --- |
+| **No merge capability** | `GitHubProvider` has no merge method. There is no route, service, or UI control that can land a change on a default branch. |
+| **Secrets stay server-side** | No `NEXT_PUBLIC_` variable holds a credential. The repositories endpoint returns no token, installation id, or clone URL. |
+| **Secret files unreadable** | A global DENY policy blocks `.env*`, `*.pem`, `*.key`, `**/secrets/**`, `**/.aws/**`, `*.tfstate` and more. |
+| **Default-deny for mutations** | An action no rule matches is denied if it changes state, allowed only if it is read-only. |
+| **Separation of duty** | `approval:decide` is held by Admin and Reviewer only, and the service refuses self-approval regardless of role. |
+| **Authorization at the service** | Every route resolves the caller's real role from Postgres. Hiding a button is a courtesy; the refusal is the control. |
+| **No arbitrary execution** | V1 executes no shell commands at all. Commands are simulated. |
+| **No token logging** | Tokens are never logged, and the rate limiter keys on a fingerprint rather than the token. |
+| **Non-members get 404** | A run or organization the caller cannot see reads as "not found", never "forbidden", which would confirm it exists. |
 
-cd services/agent-runtime && source .venv/bin/activate
-export DEVROOM_SANDBOX_IMAGE=devroom-sandbox:local
-python -m pytest -q                              # Python
+### The default-deny asymmetry
+
+The single most important line in the policy engine:
+
+```ts
+const DEFAULT_ALLOWED_ACTIONS = new Set(["READ_FILE", "RUN_TESTS", "INSPECT_DIFF"]);
 ```
 
-**TypeScript (109 tests)** — authorization matrix; ticket concurrency;
-cancel/redirect/hand-off semantics incl. idempotency, approval invalidation and
-active-slot release; DTO leak checks; draft-PR safety (branch naming, traversal
-rejection, one-PR-per-run, config gating); playbook sanitization, scoping and
-reuse accounting; insights aggregation and empty-room behaviour; membership
-invariants (last owner cannot be removed or demoted); realtime coalescing;
-forking a run at the gate onto its own cloned ticket; reviewer-agent's
-same-ticket reuse and no-review-chains rule.
-
-**Python (96 tests)** — path allow-list and traversal, deterministic model,
-redaction, config parsing; Docker-gated integration: real sandbox runs, the
-approval gate writing nothing before approval, cooperative cancellation
-stopping at a node boundary, guidance consumed exactly once, re-plan returning
-to the gate, reviewed-content recording, mid-node steering, LangGraph
-checkpoint forking against real Postgres, and reviewer-agent's structured
-verdicts against a real diff. Docker-dependent tests skip with an explicit
-message when no daemon is present — CI runs with one, so all 96 actually
-execute there (`205/205` combined, zero skips).
-
-### Manual two-browser demo
-
-1. Start Postgres, the agent runtime and `npm run dev`, with Liveblocks keys set.
-2. Browser 1: sign in as **Prasanna**. Browser 2 (incognito): **Priya**.
-3. Both open the seeded room → both appear in the presence bar.
-4. Prasanna opens a ticket and clicks **Run backend agent**.
-5. Priya sees the status, live timeline and "Prasanna is watching".
-6. At `AWAITING APPROVAL`, Priya clicks **Redirect agent** and sends guidance →
-   the run returns to planning and back to the gate. No file was written.
-7. Prasanna clicks **Approve plan** → edits, tests, diff appear in both browsers.
-8. Prasanna clicks **Save as playbook**; both see it under **Playbooks**.
-9. **Insights** reflects the run.
+Anything else that no rule matches is **denied**. A governance tool whose
+unmatched default is "allow" grants every capability nobody thought to write a
+rule about — including capabilities added to the product after the rules were
+written.
 
 ---
 
-## 11. Known limitations & roadmap
+## Policy engine
 
-**Verified in this build:** the approval gate, cancellation, redirect/re-plan,
-sandbox isolation and run persistence were exercised end-to-end against a real
-Postgres and a real Docker sandbox.
+A policy is a small declarative record, not code:
 
-**Not verified against a live service:**
+```ts
+{
+  name: "Block access to secret material",
+  effect: "DENY",                      // ALLOW | REQUIRE_APPROVAL | DENY
+  riskLevel: "HIGH",
+  priority: 30,
+  message: "Agent access to secret material is prohibited.",
+  condition: {
+    actions: ["READ_FILE", "WRITE_FILE", "READ_SECRET"],
+    pathPatterns: [".env", ".env.*", "*.pem", "**/secrets/**", "*.tfstate"],
+  },
+}
+```
 
-- **GitHub PR creation has never been run against the real GitHub API** in this
-  environment (no credential available). The flow is covered by tests at the
-  service boundary — authorization, config gating, idempotency, branch-name
-  safety, path traversal, DTO leak checks — but the network path itself is
-  untested. Treat it as unproven until you run it with a real token.
-- **Liveblocks realtime** is implemented and unit-covered, but this build had no
-  Liveblocks key, so multiplayer flows were exercised through the polling
-  fallback.
+The condition language is a **closed matcher shape** — lists and restricted
+globs — rather than an expression language. A policy engine that evaluates
+arbitrary expressions is an arbitrary code execution engine, which is exactly
+what this product exists to fence in. Globs compile with every regex
+metacharacter escaped, so a rule reading `.env*` cannot smuggle in a regex.
 
-**Other limitations:**
+### Precedence is by effect, not by order
 
-- One agent (`backend-agent`) and one language path (Python) are wired; the
-  model/tool/sandbox seams are built to extend.
-- Draft PRs apply files via the GitHub contents API (one commit per file), not
-  a single squashed tree commit.
-- Ticket ordering supports column moves; fine-grained in-column reordering uses
-  `positionBetween` but is not wired to a drag handle.
-- Playbooks are simple recipes, deliberately not a workflow language.
-- Insights are computed per request with bounded windows; no caching layer yet.
+```
+any DENY  >  any REQUIRE_APPROVAL  >  any ALLOW  >  default posture
+```
 
-**Roadmap:** a specific vendor CLI (Codex, Claude Code), if a design partner
-actually asks for one; GitHub App credentials + webhooks for live CI status;
-playbook variables; per-room agent policy.
+Rule `priority` only breaks ties *within* the same effect. With
+first-match-wins, adding one broad ALLOW at the top of the list would silently
+disable every prohibition beneath it — the footgun that makes real policy
+systems dangerous. Because DENY always wins, a profile can only ever tighten
+the global rules, never loosen them.
 
-**Shipped since the build above:** mid-node steering (guidance mid-run, not
-just at the gate, re-plans back through the same approval gate — see
-`services/agent-runtime/README.md`); forking a run waiting at the gate onto
-its own cloned ticket, so a proposed plan can be explored two ways at once
-without touching the "one active run per ticket" invariant; a second agent,
-`reviewer-agent`, which reviews another run's already-captured plan/diff/test
-result and posts a structured verdict + per-file comments, on the same
-ticket as the run it reviewed — one agent's work, reviewed by another, both
-visible to the whole room.
+### Built-in rules
+
+| Rule | Effect |
+| --- | --- |
+| Block writes to protected branches (`main`, `master`, `production`, `release/*`) | DENY |
+| Block production deployment | DENY |
+| Block access to secret material | DENY |
+| Dangerous commands (`rm -rf`, `drop table`, `terraform destroy`, force-push…) | REQUIRE_APPROVAL |
+| Pull request creation | REQUIRE_APPROVAL |
+
+### Profiles
+
+| Profile | Adds |
+| --- | --- |
+| **Safe / Read-only** | Denies all writes and all shell commands |
+| **Standard** (default) | Allows working-branch writes and ordinary build/test commands |
+| **Restricted / Verification only** | Denies authoring; allows verification commands |
+
+Test them yourself in **Policies → Policy simulator**, which calls the same
+`evaluateAction` the executor uses. A simulator that reimplements the decision
+procedure would eventually disagree with the engine, and the one time it
+matters is the time someone trusted it.
+
+---
+
+## Audit hash chain
+
+Every run owns an ordered chain of events:
+
+```
+eventHash = SHA-256( previousHash + "\n" + canonical(event) )
+```
+
+- `previousHash` is a fixed genesis constant for the first event, and the
+  prior event's hash thereafter
+- `canonical(event)` is JSON with **recursively sorted keys**, so two
+  structurally identical payloads built in different orders hash identically —
+  without this, key ordering would produce false tampering reports
+- `createdAt` is set in application code, not by the database default, because
+  it is part of the hashed payload and the verifier must reproduce it exactly
+
+Editing, deleting, or reordering any event breaks verification for that event
+and everything after it. `verifyChain` reports the exact sequence number.
+
+### What this is and is not
+
+It is a **tamper-evident, append-only log**. It is **not a blockchain** and we
+do not claim it is one.
+
+What it genuinely buys: any modification made *through the application* — a
+stray UPDATE from a route handler, a bug that rewrites history, an operator
+patching one row — is detected, because nothing in the app ever recomputes
+downstream hashes.
+
+What it does not buy: defence against an attacker with direct database write
+access who recomputes the entire chain. Anchoring the chain head to an
+append-only external store closes that gap; it is listed under Future work.
+
+Events written before hashing existed report as **unchained** rather than as
+tampering. "We never hashed this" and "someone edited this" are different
+claims, and conflating them would make the verified badge meaningless.
+
+---
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Control room](docs/screenshots/control-room.png) |
+| **Dashboard** — metrics, policy outcomes, activity | **Control room** — live timeline, policy panel, diff |
+| ![New run preflight](docs/screenshots/new-run-preflight.png) | ![Approvals](docs/screenshots/approvals.png) |
+| **Preflight** — what the agent may and may not do | **Approvals** — the reviewer's queue |
+| ![Evidence](docs/screenshots/evidence.png) | ![Policies](docs/screenshots/policies.png) |
+| **Evidence report** — verified chain, full record | **Policies** — rule set and simulator |
+
+---
+
+## API
+
+All routes are Zod-validated and return a consistent error envelope
+(`{ error: { code, message, details } }`).
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/runs?roomId=` | List runs (paginated) |
+| `POST` | `/api/runs` | Create a governed run |
+| `POST` | `/api/runs/preflight` | Evaluate a prospective run |
+| `GET` | `/api/runs/:id` | Run detail |
+| `POST` | `/api/runs/:id/simulate` | Start the mock executor |
+| `POST` | `/api/runs/:id/pause` · `/resume` · `/cancel` | Lifecycle control |
+| `GET` | `/api/runs/:id/events` | Timeline (snapshot) |
+| `GET` | `/api/runs/:id/events/stream` | Timeline (SSE) |
+| `GET` | `/api/runs/:id/approval-requests` | Gates and their history |
+| `POST` | `/api/approval-requests/:id/approve` · `/reject` | Resolve a gate |
+| `GET` | `/api/runs/:id/evidence` | Evidence bundle (live + sealed) |
+| `GET` | `/api/runs/:id/evidence/download` | Bundle as a JSON attachment |
+| `GET` | `/api/policies?roomId=` | Active rule set |
+| `POST` | `/api/policies/evaluate` | Policy simulator |
+| `GET` | `/api/github/repositories?roomId=` | Enabled repositories |
+
+There is deliberately **no** endpoint to create an approval request: gates are
+opened by the executor when policy demands one, never by a client. A gate a
+caller can create is a gate a caller can decline to create.
+
+---
+
+## Testing
+
+```bash
+npm run typecheck
+npm run lint
+npm test                # 259 unit + integration tests
+npm run build
+
+# End-to-end, against a running seeded app:
+npm run db:seed && npm run dev
+E2E_NO_SERVER=1 E2E_BASE_URL=http://localhost:3000 npx playwright test
+```
+
+Integration and e2e tests need PostgreSQL; integration tests skip themselves
+cleanly when `DATABASE_URL` is unset.
+
+Coverage of the properties that matter:
+
+- **Policy evaluation** — 48 unit tests: each built-in rule, effect precedence,
+  glob escaping, default posture, mode bounds, profile composition
+- **Audit chain** — 23 unit tests: canonicalization, and detection of modified,
+  deleted, reordered, inserted, and re-hashed-with-stale-parent events
+- **Approval gate** — integration tests for gating, self-approval refusal,
+  rejection ending the run, double-resolution refusal, and tamper detection on
+  a persisted event
+- **End-to-end** — the whole demo flow through the real UI, including that the
+  requester is refused their own approval and that the downloaded bundle
+  verifies
+
+---
+
+## Repository layout
+
+```
+src/
+  app/
+    (control-room)/          dashboard · runs · approvals · repositories · policies · evidence
+    api/                     route handlers
+  components/agentguard/     control-room UI
+  lib/
+    agents/                  AgentExecutor, MockAgentExecutor, providers, approvals
+    audit/                   hash chain + verifier
+    policy-engine/           condition matching, evaluation, built-in rules
+    evidence/                bundle builder
+    dashboard/               metrics
+prisma/                      schema, migrations, seed
+scripts/verify-chains.ts     out-of-band integrity check
+tests/                       unit · integration · e2e
+services/agent-runtime/      Python LangGraph runtime (earlier foundation)
+```
+
+Domain logic stays out of React components: pages read from services in `lib/`.
+
+---
+
+## GitHub App integration roadmap
+
+V1 talks to GitHub with a personal access token, which is fine for one operator
+and wrong for a team: a PAT carries one person's full account access and does
+not expire.
+
+1. **Register the App** with read access to code, issues, and pull requests,
+   plus write access to pull requests. **Do not request merge or admin scopes** —
+   the absence is the product's core claim.
+2. **Installation token exchange** — sign an App JWT with the private key
+   server-side, trade it for a per-installation token that expires in an hour.
+   The private key must never reach a browser.
+3. **Implement `GitHubProvider`** (`src/lib/agents/providers.ts`). The interface
+   is already the shape the control plane calls; only the implementation is
+   missing. Note it still has no merge method.
+4. **Webhooks** at `/api/github/webhooks`, signature-verified with
+   `GITHUB_WEBHOOK_SECRET`, to keep PR state fresh.
+5. **Real PR creation behind explicit confirmation**, gated by the same
+   approval that gates the simulated one.
+
+---
+
+## Future work
+
+**Replace the mock executor.** `SandboxProvider` and `LLMProvider` are already
+the seams. A real worker needs a per-run filesystem destroyed on completion, no
+network egress during the agent phase, runtime-enforced resource limits, and no
+ambient credentials in the sandbox. The Python LangGraph runtime in
+`services/agent-runtime/` is the starting point.
+
+**Durable job queue.** The V1 driver is a detached async loop in the Next.js
+process — fine for a long-lived server, wrong for serverless. Run progress
+already lives in the database and `resumeStalledRun` recovers stranded runs, so
+the change is contained to `src/lib/agents/driver.ts`.
+
+**External anchoring for the audit chain.** Periodically publishing the chain
+head to an append-only external store closes the direct-database-write gap
+described above.
+
+**Policy authoring UI.** Rules are seeded and readable today; creating and
+editing them in-app needs a form that cannot express an invalid condition.
+
+**Multi-organization routing.** The data model already supports it; the UI
+assumes one organization per user.
+
+**Richer diff review** — inline comments on agent-proposed changes, and
+per-file approval rather than whole-run approval.
+
+---
+
+## Related documentation
+
+- [`docs/agent-dev-room-foundations.md`](docs/agent-dev-room-foundations.md) —
+  the multiplayer run/room foundations this control plane is layered on
+- [`docs/agent-event-contract.md`](docs/agent-event-contract.md) — ingestion
+  contract for external agent adapters
+- [`adapters/claude-code/`](adapters/claude-code/) — a working adapter that
+  publishes a Claude Code session into a room

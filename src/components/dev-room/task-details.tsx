@@ -15,6 +15,7 @@ import {
 import { AgentTaskDialog } from "@/components/dev-room/task-dialog";
 import { AgentTaskComments } from "@/components/dev-room/task-comments";
 import { AgentRunPanel } from "@/components/dev-room/agent-run-panel";
+import { ConnectAgent } from "@/components/dev-room/connect-agent";
 import { AgentTaskViewers } from "@/components/dev-room/task-viewers";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -200,6 +201,7 @@ export function AgentTaskDetails({
             Coding agent
           </h3>
           <AgentRunPanel key={task.id} taskId={task.id} />
+          <ConnectAgent taskId={task.id} />
         </div>
       </div>
 

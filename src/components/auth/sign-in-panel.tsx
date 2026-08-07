@@ -34,10 +34,11 @@ export function SignInPanel({ users }: { users: SeedUserOption[] }) {
   return (
     <div className="w-full max-w-md space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">Sign in to Agent Dev Room</h2>
+        <h2 className="text-lg font-semibold">Sign in to AgentGuard</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Development sign-in — pick a seeded teammate or enter any email. Open a
-          second browser and sign in as a different user to test collaboration.
+          Development sign-in — pick a seeded teammate or enter any email.
+          Approval requires two different people, so sign in as the engineer to
+          start a run and as the reviewer to approve it.
         </p>
       </div>
 

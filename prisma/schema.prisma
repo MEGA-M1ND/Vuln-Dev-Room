@@ -17,6 +17,11 @@ enum MembershipRole {
   OWNER
   ENGINEER
   VIEWER
+  // AgentGuard: a dedicated approver. Sees everything an engineer sees and may
+  // resolve approval gates, but never starts, steers, or authors work — the
+  // separation of duty that makes an approval meaningful rather than a
+  // formality the requester can grant themselves. Appended, never reordered.
+  REVIEWER
 }
 
 enum AgentTaskStatus {
@@ -67,6 +72,15 @@ enum AgentRunStatus {
   // Deliberately dropped without merging — distinct from FAILED, which means
   // the run itself broke.
   ABANDONED
+  // --- AgentGuard Control Room. Appended, never reordered.
+  // Created but not yet submitted; the requester is still editing it.
+  DRAFT
+  // Submitted, with the policy preflight being evaluated before execution.
+  PREFLIGHT
+  // A human suspended execution. Distinct from AWAITING_APPROVAL (blocked on a
+  // decision) and BLOCKED (blocked on an external dependency): this one resumes
+  // the moment someone presses resume, with nothing else required.
+  PAUSED
 }
 
 enum RunArtifactType {
@@ -130,6 +144,23 @@ enum RunEventType {
   REVIEW_READY
   RUN_MERGED
   RUN_ABANDONED
+  // --- AgentGuard Control Room. Appended, never reordered.
+  // A governed action was checked against the policy set and permitted. Logged
+  // for allowed actions too: a trail that records only refusals cannot show
+  // that anything was ever checked.
+  POLICY_EVALUATED
+  // A governed action was refused outright.
+  POLICY_DENIED
+  // An approval gate was resolved.
+  APPROVAL_GRANTED
+  APPROVAL_REJECTED
+  // Human pause/resume of a live run.
+  RUN_PAUSED
+  RUN_RESUMED
+  // The evidence bundle was sealed at the end of the run.
+  EVIDENCE_FINALIZED
+  // The isolated workspace was torn down.
+  SANDBOX_DESTROYED
 }
 
 /// What kind of human intervention was recorded against a run.
@@ -143,6 +174,68 @@ enum RunInterventionStatus {
   PENDING
   APPLIED
   REJECTED
+}
+
+// --- AgentGuard Control Room: governance -----------------------------------
+
+/// What a governed run is permitted to attempt. Chosen by the requester at
+/// creation and never widened afterwards — a PLAN_ONLY run cannot decide
+/// mid-flight that it would like to write files.
+enum RunMode {
+  /// Read and reason only. Produces a plan; touches nothing.
+  PLAN_ONLY
+  /// Check out an existing pull request and run its verification suite.
+  VERIFY_PULL_REQUEST
+  /// Propose a concrete diff, gated by approval before any PR is created.
+  PROPOSE_CODE_CHANGE
+}
+
+/// The verbs the policy engine reasons about. Deliberately a closed enum: a
+/// policy that cannot name the action it governs is a policy that silently
+/// fails open, so new capabilities must be added here consciously.
+enum GovernedAction {
+  READ_FILE
+  RUN_TESTS
+  INSPECT_DIFF
+  WRITE_FILE
+  CREATE_BRANCH
+  CREATE_PULL_REQUEST
+  PUSH_PROTECTED_BRANCH
+  DEPLOY_PRODUCTION
+  READ_SECRET
+  RUN_COMMAND
+}
+
+enum PolicyEffect {
+  ALLOW
+  DENY
+  REQUIRE_APPROVAL
+}
+
+enum PolicyScope {
+  GLOBAL
+  ORGANIZATION
+  REPOSITORY
+}
+
+/// The outcome of evaluating one action against the active policy set.
+enum PolicyOutcome {
+  ALLOWED
+  DENIED
+  APPROVAL_REQUIRED
+}
+
+enum ApprovalRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  /// The run ended (cancelled/failed) before a reviewer answered.
+  CANCELLED
+}
+
+enum ApprovalDecisionKind {
+  APPROVE
+  REJECT
 }
 
 model User {
@@ -163,6 +256,9 @@ model User {
   createdPlaybooks Playbook[]       @relation("PlaybookCreatedBy")
   githubConnections GitHubConnection[] @relation("GitHubConnectionCreatedBy")
   riskDismissals    RiskSignalDismissal[] @relation("RiskDismissedBy")
+  createdPolicies   Policy[]             @relation("PolicyCreatedBy")
+  approvalRequests  ApprovalRequest[]    @relation("ApprovalRequestedBy")
+  approvalDecisions ApprovalDecision[]   @relation("ApprovalReviewer")
 
   @@index([email])
 }
@@ -184,6 +280,9 @@ model Room {
   playbooks        Playbook[]
   githubConnection GitHubConnection?
   repositories     RepositoryConnection[]
+  policyProfiles   PolicyProfile[]
+  policies         Policy[]
+  policyDecisions  PolicyDecision[]
 
   @@index([createdById])
 }
@@ -307,6 +406,22 @@ model AgentRun {
   // Ingestion resolves (taskId, agentSessionId) to a run so an adapter can
   // publish a whole session's events without tracking our run ids.
   agentSessionId      String?
+  // --- AgentGuard Control Room: governance metadata -----------------------
+  // What this run is allowed to attempt. Fixed at creation; the policy engine
+  // reads it as an outer bound on every action the agent proposes.
+  mode                RunMode        @default(PROPOSE_CODE_CHANGE)
+  // The policy profile in force for the whole run. Captured as a relation so
+  // the evidence report can state exactly which ruleset governed it, even if
+  // the profile is edited afterwards (decisions themselves are immutable).
+  policyProfileId     String?
+  // Branch the agent reads from, and the branch it would open a PR from.
+  // `baseRevision` remains the resolved commit sha; these are the human-facing
+  // branch names the control room and evidence report display.
+  baseBranch          String         @default("main")
+  workingBranch       String?
+  // Aggregate risk for the run, raised as policy decisions accumulate. Seeded
+  // from the task's declared level rather than inferred from a scan.
+  riskLevel           RiskLevel      @default(MEDIUM)
   // Bumped on every status change (a lightweight change token for polling).
   runVersion          Int            @default(1)
   createdAt           DateTime       @default(now())
@@ -335,6 +450,10 @@ model AgentRun {
   pullRequest   PullRequestLink?
   riskDismissals RiskSignalDismissal[]
   savedPlaybook Playbook?         @relation("PlaybookSourceRun")
+  policyProfile    PolicyProfile?    @relation(fields: [policyProfileId], references: [id], onDelete: SetNull)
+  policyDecisions  PolicyDecision[]
+  approvalRequests ApprovalRequest[]
+  evidenceReport   EvidenceReport?
 
   @@index([taskId, createdAt])
   @@index([roomId])
@@ -532,11 +651,191 @@ model RunEvent {
   // directly and leaves this null. Unique per run, so replaying a delivery is
   // a no-op rather than a duplicate timeline entry.
   externalEventId String?
+  // --- AgentGuard: tamper-evident chain -----------------------------------
+  // eventHash = SHA-256(previousHash + canonical(event)). `previousHash` is the
+  // genesis constant for sequence 1 and the prior event's hash thereafter, so
+  // editing or removing any event breaks verification for every event after it.
+  //
+  // This is an append-only, tamper-EVIDENT log: it proves the chain is
+  // internally consistent and detects after-the-fact edits made through the
+  // application. It is explicitly NOT a blockchain and offers no defence
+  // against an attacker with direct database write access who recomputes the
+  // whole chain — that requires external anchoring, noted as future work.
+  //
+  // Nullable because rows written before this migration have no hash; the
+  // verifier reports those as "unchained" rather than failing the run.
+  previousHash String?
+  eventHash    String?
   createdAt   DateTime     @default(now())
 
   run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  policyDecision PolicyDecision?
 
   @@unique([runId, sequence])
   @@unique([runId, externalEventId])
   @@index([runId])
+}
+
+// --- AgentGuard Control Room: policy, approval, evidence -------------------
+
+/// A named bundle of policies applied to a run as a unit ("Safe / Read-only",
+/// "Standard", "Restricted"). Built-in profiles are seeded with `roomId = null`
+/// and shared by every organization; a room may define its own.
+model PolicyProfile {
+  id          String   @id @default(cuid())
+  /// Null for a built-in profile available to all organizations.
+  roomId      String?
+  /// Stable machine key ("safe", "standard", "restricted"). Unique per scope.
+  key         String
+  name        String
+  description String
+  /// Chosen by default on the new-run form when the room has no preference.
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  room     Room?      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  policies Policy[]
+  runs     AgentRun[]
+
+  @@unique([roomId, key])
+  @@index([roomId])
+}
+
+/// A single governance rule. `conditionJson` is a small, closed matcher shape
+/// (see `lib/policy-engine/types.ts`) rather than free-form code: a policy
+/// engine that evaluates arbitrary expressions is an arbitrary code execution
+/// engine, which is precisely what this product exists to prevent.
+model Policy {
+  id              String       @id @default(cuid())
+  policyProfileId String?
+  /// Null for a global rule that applies regardless of organization.
+  roomId          String?
+  name            String
+  description     String
+  enabled         Boolean      @default(true)
+  scope           PolicyScope  @default(GLOBAL)
+  conditionJson   Json
+  effect          PolicyEffect
+  riskLevel       RiskLevel    @default(MEDIUM)
+  /// Shown to the user verbatim when this rule decides an action.
+  message         String
+  /// Lower runs first. DENY rules are seeded below REQUIRE_APPROVAL so an
+  /// outright prohibition always wins over "ask a human".
+  priority        Int          @default(100)
+  createdById     String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  profile   PolicyProfile?   @relation(fields: [policyProfileId], references: [id], onDelete: Cascade)
+  room      Room?            @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdBy User?            @relation("PolicyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  decisions PolicyDecision[]
+
+  @@index([policyProfileId, priority])
+  @@index([roomId])
+  @@index([enabled])
+}
+
+/// The immutable record of one policy evaluation. Written for every governed
+/// action, including allowed ones — an audit trail that only records denials
+/// cannot show that anything was checked.
+model PolicyDecision {
+  id           String         @id @default(cuid())
+  runId        String?
+  roomId       String
+  /// Null when no rule matched and the default (allow) applied.
+  policyId     String?
+  action       GovernedAction
+  outcome      PolicyOutcome
+  /// The action's subject: branch, path, command. Never contains secret values.
+  resourceJson Json?
+  reason       String
+  actorType    String         @default("agent")
+  actorId      String?
+  /// The timeline event this decision produced, when it generated one.
+  eventId      String?        @unique
+  createdAt    DateTime       @default(now())
+
+  run    AgentRun? @relation(fields: [runId], references: [id], onDelete: Cascade)
+  room   Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  policy Policy?   @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  event  RunEvent? @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
+  @@index([runId, createdAt])
+  @@index([roomId, outcome, createdAt])
+  @@index([policyId])
+}
+
+/// A protected action parked until a human answers. The run cannot proceed past
+/// the requested action while this is PENDING — the gate is enforced in the
+/// executor, not merely displayed in the UI.
+model ApprovalRequest {
+  id            String                @id @default(cuid())
+  runId         String
+  action        GovernedAction
+  status        ApprovalRequestStatus @default(PENDING)
+  /// One-line statement of what the agent wants to do.
+  summary       String
+  /// Structured review context: files changed, diff stat, test results, risk.
+  detailsJson   Json?
+  /// The rule that forced this gate, for "why am I being asked?".
+  policyId      String?
+  requestedById String?
+  createdAt     DateTime              @default(now())
+  resolvedAt    DateTime?
+
+  run         AgentRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  requestedBy User?              @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  decisions   ApprovalDecision[]
+
+  // At most one unresolved gate per run: a second concurrent request would make
+  // "what is this run waiting for?" ambiguous. Set to `runId` while PENDING and
+  // cleared on resolution, so Postgres enforces it rather than application code.
+  activeRunId String? @unique
+
+  @@index([runId, createdAt])
+  @@index([status, createdAt])
+}
+
+/// A reviewer's answer. Append-only and never updated in place: a changed mind
+/// is a second decision, so the evidence report shows the full deliberation
+/// rather than only its conclusion.
+model ApprovalDecision {
+  id                String               @id @default(cuid())
+  approvalRequestId String
+  reviewerId        String
+  decision          ApprovalDecisionKind
+  comment           String?
+  createdAt         DateTime             @default(now())
+
+  request  ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
+  reviewer User            @relation("ApprovalReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  @@index([approvalRequestId, createdAt])
+  @@index([reviewerId])
+}
+
+/// A finalized, downloadable evidence bundle for a completed run.
+///
+/// Materialized once the run reaches a terminal state: the point of an evidence
+/// report is that it is a snapshot of what was true at completion, so it is
+/// stored rather than recomputed on every view. `integrityVerified` records the
+/// hash-chain result AT GENERATION TIME; the report page re-verifies live and
+/// shows both, which is what makes later tampering visible.
+model EvidenceReport {
+  id                String   @id @default(cuid())
+  runId             String   @unique
+  reportJson        Json
+  integrityVerified Boolean
+  /// Number of events covered by the chain at generation time.
+  eventCount        Int      @default(0)
+  /// The final event's hash — the single value that fingerprints the whole run.
+  chainHead         String?
+  riskLevel         RiskLevel
+  generatedAt       DateTime @default(now())
+
+  run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([generatedAt])
 }

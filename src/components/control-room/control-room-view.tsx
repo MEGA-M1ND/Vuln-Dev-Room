@@ -34,6 +34,9 @@ const STATUS_STYLES: Record<AgentRunStatus, string> = {
   REVIEW_READY: "text-violet-700 border-violet-300",
   MERGED: "text-green-700 border-green-300",
   ABANDONED: "text-slate-600 border-slate-300",
+  DRAFT: "text-slate-600 border-slate-300",
+  PREFLIGHT: "text-slate-700 border-slate-300",
+  PAUSED: "text-amber-700 border-amber-300",
 };
 
 const RISK_LABEL: Record<RiskLevel, string> = {
