@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createGovernedRun, createRunSchema } from "@/lib/agents/create-run";
 import { handleRouteError, ApiError } from "@/lib/api/errors";
 import { requireRoomPermission } from "@/lib/auth/guards";
+import { requireUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 
 /**
@@ -13,6 +14,10 @@ import { prisma } from "@/lib/db/client";
  */
 export async function GET(req: NextRequest) {
   try {
+    // Authenticate before validating input. An anonymous caller should learn
+    // that it needs to sign in, not what this endpoint's parameters are.
+    await requireUser();
+
     const url = new URL(req.url);
     const roomId = url.searchParams.get("roomId");
     if (!roomId) throw new ApiError("BAD_REQUEST", "roomId is required.");

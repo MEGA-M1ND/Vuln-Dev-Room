@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { handleRouteError, ApiError } from "@/lib/api/errors";
 import { requireRoomPermission } from "@/lib/auth/guards";
+import { requireUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 
 /**
@@ -13,6 +14,10 @@ import { prisma } from "@/lib/db/client";
  */
 export async function GET(req: NextRequest) {
   try {
+    // Authenticate before validating input. An anonymous caller should learn
+    // that it needs to sign in, not what this endpoint's parameters are.
+    await requireUser();
+
     const roomId = new URL(req.url).searchParams.get("roomId");
     if (!roomId) {
       throw new ApiError("BAD_REQUEST", "roomId is required.");
@@ -23,7 +28,10 @@ export async function GET(req: NextRequest) {
     const [policies, profiles] = await Promise.all([
       prisma.policy.findMany({
         where: { OR: [{ roomId: null }, { roomId }] },
-        orderBy: [{ priority: "asc" }, { name: "asc" }],
+        // `id` last so the order is total: a room's copy of a built-in rule
+        // shares both the priority and the name of the global one, so without it
+        // the list could reorder between identical requests.
+        orderBy: [{ priority: "asc" }, { name: "asc" }, { id: "asc" }],
         include: {
           profile: { select: { id: true, key: true, name: true } },
           createdBy: { select: { id: true, name: true } },

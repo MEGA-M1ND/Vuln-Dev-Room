@@ -99,7 +99,14 @@ export async function loadActivePolicies(
         ...(policyProfileId ? [{ policyProfileId }] : []),
       ],
     },
-    orderBy: { priority: "asc" },
+    // `priority` alone is not a total order: two rules may legitimately share a
+    // priority (a room's own copy of a built-in rule alongside the global one,
+    // for example). Postgres is then free to return tied rows in any order, and
+    // whichever arrives first is the one the evidence report names as the rule
+    // that triggered the decision — so identical requests could attribute to
+    // different rules across runs. `id` is unique and stable, which makes the
+    // sort total and the attribution reproducible.
+    orderBy: [{ priority: "asc" }, { id: "asc" }],
   });
 
   return policies.map(toEvaluable);

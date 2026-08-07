@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { handleRouteError, ApiError } from "@/lib/api/errors";
 import { requireRoomPermission } from "@/lib/auth/guards";
+import { requireUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 import { env, isGitHubConfigured } from "@/env";
 
@@ -31,6 +32,10 @@ const REQUESTED_PERMISSIONS = [
 
 export async function GET(req: NextRequest) {
   try {
+    // Authenticate before validating input. An anonymous caller should learn
+    // that it needs to sign in, not what this endpoint's parameters are.
+    await requireUser();
+
     const roomId = new URL(req.url).searchParams.get("roomId");
     if (!roomId) throw new ApiError("BAD_REQUEST", "roomId is required.");
 
