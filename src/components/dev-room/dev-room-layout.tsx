@@ -6,6 +6,7 @@ import { useBoard } from "@/components/dev-room/board-context";
 import { RoomHeader } from "@/components/dev-room/room-header";
 import { KanbanBoard } from "@/components/dev-room/kanban-board";
 import { AgentTaskDetails } from "@/components/dev-room/task-details";
+import { BlastRadiusPanel } from "@/components/BlastRadiusPanel";
 import { RoomRoster } from "@/components/dev-room/room-roster";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -17,7 +18,7 @@ import { cn } from "@/lib/utils";
  *    drawers via header/close controls.
  */
 export function DevRoomLayout({ realtimeEnabled }: { realtimeEnabled: boolean }) {
-  const { selectedTaskId, selectTask } = useBoard();
+  const { selectedTaskId, selectTask, board } = useBoard();
   const [rosterOpen, setRosterOpen] = React.useState(false);
 
   // On smaller screens, selecting a task opens the details drawer.
@@ -55,7 +56,17 @@ export function DevRoomLayout({ realtimeEnabled }: { realtimeEnabled: boolean })
           label="Room roster"
           inlineClassName="hidden xl:flex xl:w-72 xl:border-l"
         >
-          <RoomRoster />
+          {/* Roster and blast radius share this column: "who is here" and
+              "what would this change touch" are both room-level context, and
+              the blast-radius question is asked while planning, not while
+              looking at one already-created task. */}
+          <div className="flex min-h-0 flex-col gap-4">
+            <RoomRoster />
+            <BlastRadiusPanel
+              roomId={board.room.id}
+              realtimeEnabled={realtimeEnabled}
+            />
+          </div>
         </SidePanel>
       </div>
     </div>
