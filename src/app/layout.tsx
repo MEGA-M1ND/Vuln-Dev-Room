@@ -4,9 +4,9 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Agent Dev Room",
+  title: "AgentGuard Control Room",
   description:
-    "A shared multiplayer control room for engineering teams — Stage 1.",
+    "Governance and shared visibility for AI coding agents: policy enforcement, human approval gates, and a tamper-evident audit trail.",
 };
 
 export default function RootLayout({

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { getCurrentUser } from "@/lib/auth/session";
 import { isDevAuthEnabled, isGitHubOAuthConfigured } from "@/env";
@@ -11,6 +12,17 @@ import { GitHubSignInButton } from "@/components/auth/github-sign-in-button";
 
 export default async function HomePage() {
   const user = await getCurrentUser();
+
+  // A signed-in member belongs in the control room, not on a sign-in screen.
+  // Checked here rather than in middleware so the redirect depends on actual
+  // membership, which middleware cannot query.
+  if (user) {
+    const membership = await prisma.roomMembership.findFirst({
+      where: { userId: user.id },
+      select: { id: true },
+    });
+    if (membership) redirect("/dashboard");
+  }
 
   // For the dev switcher only: list existing users to sign in as.
   const seedUsers = isDevAuthEnabled
@@ -25,10 +37,20 @@ export default async function HomePage() {
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold">
-            D
-          </div>
-          <span className="text-lg font-semibold">Agent Dev Room</span>
+          <svg
+            viewBox="0 0 24 24"
+            className="h-8 w-8 text-agent"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 2.5 4.5 5.5v6c0 4.6 3.2 8.9 7.5 10 4.3-1.1 7.5-5.4 7.5-10v-6L12 2.5Z" />
+            <path d="m9 12 2 2 4-4" />
+          </svg>
+          <span className="text-lg font-semibold">AgentGuard Control Room</span>
         </div>
         {user ? (
           <div className="flex items-center gap-3">
@@ -42,32 +64,35 @@ export default async function HomePage() {
       <div className="grid flex-1 items-center gap-12 py-12 lg:grid-cols-2">
         <section>
           <span className="inline-flex items-center rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground">
-            Stage 1 · Multiplayer product shell
+            Governance for AI coding agents
           </span>
           <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-5xl">
-            A shared control room for engineering teams.
+            Agent work you can actually supervise.
           </h1>
           <p className="mt-4 max-w-prose text-muted-foreground">
-            Agent Dev Room is a browser-based control room where engineers share a
-            Kanban board, see who is online, track which task each teammate is
-            viewing, and discuss work through realtime comments. Durable state
-            lives in PostgreSQL; presence and comments are powered by Liveblocks.
+            Coding agents mostly run invisibly inside one developer&rsquo;s
+            terminal. AgentGuard puts a control plane around them: explicit
+            policy before execution, a live view of what the agent is doing, a
+            human approval gate before any pull request, and a tamper-evident
+            record afterwards.
           </p>
           <ul className="mt-6 grid gap-2 text-sm text-muted-foreground">
-            <li>• Shared task board with live updates</li>
-            <li>• Realtime presence and selected-task awareness</li>
-            <li>• AgentTask comments synchronized across browsers</li>
+            <li>• Policy evaluated before every governed action</li>
+            <li>• Live event timeline: plans, tool calls, tests, decisions</li>
+            <li>• Approval gate a requester cannot grant themselves</li>
+            <li>• Hash-chained audit trail and downloadable evidence</li>
           </ul>
           {user ? (
             <div className="mt-8">
-              <Link href="/rooms">
-                <Button size="md">Go to your rooms →</Button>
+              <Link href="/dashboard">
+                <Button size="md">Open the control room →</Button>
               </Link>
             </div>
           ) : null}
-          <p className="mt-8 text-xs text-muted-foreground">
-            Note: AI coding agents are a future stage and are intentionally not
-            present yet. Nothing here executes code or touches repositories.
+          <p className="mt-8 max-w-prose text-xs text-muted-foreground">
+            Agent execution is simulated in V1: nothing here runs a shell command
+            or merges anything. The control plane around it &mdash; policy,
+            gating, and audit &mdash; is real.
           </p>
         </section>
 
@@ -85,8 +110,8 @@ export default async function HomePage() {
                 <p className="font-medium">Signed in as {user.name}</p>
                 <p className="text-sm text-muted-foreground">{user.email}</p>
               </div>
-              <Link href="/rooms" className="block">
-                <Button className="w-full">Open rooms dashboard</Button>
+              <Link href="/dashboard" className="block">
+                <Button className="w-full">Open the control room</Button>
               </Link>
             </div>
           ) : isDevAuthEnabled ? (
@@ -94,7 +119,7 @@ export default async function HomePage() {
           ) : isGitHubOAuthConfigured ? (
             <div className="space-y-4">
               <div>
-                <h2 className="text-lg font-semibold">Sign in to Agent Dev Room</h2>
+                <h2 className="text-lg font-semibold">Sign in to AgentGuard</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Sign in with your GitHub account to continue.
                 </p>

@@ -23,6 +23,9 @@ export const RUN_STATUS_LABEL: Record<AgentRunStatus, string> = {
   REVIEW_READY: "Review ready",
   MERGED: "Merged",
   ABANDONED: "Abandoned",
+  DRAFT: "Draft",
+  PREFLIGHT: "Preflight",
+  PAUSED: "Paused",
 };
 
 /**
@@ -81,7 +84,63 @@ export const EVENT_LABEL: Record<string, string> = {
   REVIEW_READY: "Ready for review",
   RUN_MERGED: "Merged",
   RUN_ABANDONED: "Abandoned",
+  // AgentGuard governance events.
+  POLICY_EVALUATED: "Policy check passed",
+  POLICY_DENIED: "Policy denied the action",
+  APPROVAL_GRANTED: "Approval granted",
+  APPROVAL_REJECTED: "Approval rejected",
+  RUN_PAUSED: "Run paused",
+  RUN_RESUMED: "Run resumed",
+  EVIDENCE_FINALIZED: "Evidence report finalized",
+  SANDBOX_DESTROYED: "Sandbox destroyed",
 };
+
+/**
+ * Visual grouping for the timeline. Each kind gets its own colour treatment, so
+ * a reader can find the policy decisions in a fifty-event trail without reading
+ * every line.
+ */
+export type EventKind =
+  | "policy-allow"
+  | "policy-deny"
+  | "approval"
+  | "agent"
+  | "tool"
+  | "test"
+  | "delivery"
+  | "lifecycle";
+
+const EVENT_KIND: Record<string, EventKind> = {
+  POLICY_EVALUATED: "policy-allow",
+  POLICY_DENIED: "policy-deny",
+  APPROVAL_REQUESTED: "approval",
+  APPROVAL_GRANTED: "approval",
+  APPROVAL_REJECTED: "approval",
+  PLAN_APPROVED: "approval",
+  PLAN_REJECTED: "approval",
+  PLAN_CREATED: "agent",
+  AGENT_PROGRESS: "agent",
+  AGENT_STARTED: "agent",
+  REPO_EXPLORATION_FINISHED: "agent",
+  DECISION_RECORDED: "agent",
+  TOOL_CALL: "tool",
+  COMMAND_EXECUTED: "tool",
+  FILE_PATCHED: "tool",
+  EDITS_STARTED: "tool",
+  TESTS_STARTED: "test",
+  TESTS_FINISHED: "test",
+  DIFF_CAPTURED: "test",
+  PR_DRAFTED: "delivery",
+  PR_LINKED: "delivery",
+  PR_UPDATED: "delivery",
+  REVIEW_READY: "delivery",
+  EVIDENCE_FINALIZED: "delivery",
+};
+
+/** Which visual family an event belongs to. Unknown types read as lifecycle. */
+export function eventKind(type: string): EventKind {
+  return EVENT_KIND[type] ?? "lifecycle";
+}
 
 /** Falls back to the raw enum value so a new type is never rendered blank. */
 export function eventLabel(type: string): string {

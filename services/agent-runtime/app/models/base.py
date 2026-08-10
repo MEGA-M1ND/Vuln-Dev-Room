@@ -84,6 +84,73 @@ class ToolCall:
     args: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass
+class ImpactSummaryRequest:
+    """Everything needed to describe a blast radius in plain language.
+
+    `audience` is the requester's room role (OWNER / ENGINEER / VIEWER /
+    REVIEWER). It tunes depth, not content: the same facts are reported to
+    everyone, because a summary that omitted a risk for a senior reader would be
+    a summary that hid it.
+    """
+
+    query: str
+    seeds: list[str]
+    affected_paths: list[str]
+    critical_paths: list[str]
+    api_endpoints: list[str]
+    owners: list[str] = field(default_factory=list)
+    audience: str = "ENGINEER"
+    truncated: bool = False
+
+
+def render_default_impact_summary(request: ImpactSummaryRequest) -> str:
+    """Deterministic, provider-free impact summary.
+
+    Used as the protocol default and as FakeModel's answer, so the whole
+    blast-radius feature is demoable and testable with no model credentials.
+    """
+    reach = len(request.affected_paths)
+    newcomer = request.audience == "VIEWER"
+
+    lines: list[str] = []
+    if reach == 0:
+        lines.append(
+            f"Nothing in the repository imports {request.query}, so a change there "
+            "looks self-contained."
+        )
+        return " ".join(lines)
+
+    lines.append(
+        f"Changing {request.query} reaches {reach} file{'s' if reach != 1 else ''}."
+    )
+    if newcomer:
+        lines.append(
+            "That count is everything that imports it directly or indirectly — "
+            "those are the places most likely to break."
+        )
+
+    if request.critical_paths:
+        joined = ", ".join(request.critical_paths)
+        lines.append(
+            f"It touches paths this team marked critical ({joined}), so expect review."
+        )
+    if request.api_endpoints:
+        joined = ", ".join(request.api_endpoints[:5])
+        lines.append(f"API surface affected: {joined}.")
+        if newcomer:
+            lines.append("Changes there are visible to callers outside this repo.")
+    if request.owners:
+        joined = ", ".join(request.owners[:3])
+        lines.append(f"Recent work here is by {joined} — worth a heads-up.")
+    if request.truncated:
+        lines.append(
+            "The walk hit its bound, so this is a partial view; treat the count "
+            "as a floor, not a total."
+        )
+    return " ".join(lines)
+
+
 class Model(Protocol):
     name: str
 
@@ -120,3 +187,15 @@ class Model(Protocol):
         everything it needs is already captured on the run being reviewed.
         """
         ...
+
+    def summarize_impact(self, request: ImpactSummaryRequest) -> str:
+        """Describe a blast radius in plain language (blast-radius query).
+
+        Defaulted rather than required: this arrived after the protocol was in
+        use, and a provider that has not implemented it should degrade to a
+        factual summary, not crash a query. The default states only what the
+        static analysis actually found — it never speculates about intent,
+        because a confident sentence about consequences nobody verified is worse
+        than a plain list of facts.
+        """
+        return render_default_impact_summary(request)

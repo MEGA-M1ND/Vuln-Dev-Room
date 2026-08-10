@@ -2,49 +2,145 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: 0 0% 100%;
-  --foreground: 222 47% 11%;
-  --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 47%;
-  --primary: 222 47% 24%;
-  --primary-foreground: 210 40% 98%;
-  --border: 214 32% 91%;
-  --input: 214 32% 91%;
-  --ring: 222 47% 24%;
-  --radius: 0.5rem;
-}
+/**
+ * AgentGuard Control Room — dark enterprise palette.
+ *
+ * Committed to dark rather than following the system preference. The product is
+ * a monitoring surface people leave open on a second screen next to a terminal,
+ * and status colour is load-bearing here: a green "allowed" and a red "denied"
+ * have to mean the same thing to everyone looking at the same screen. Two
+ * palettes would mean tuning those semantics twice and getting one of them
+ * subtly wrong.
+ *
+ * Semantic tokens (--allow, --deny, --gate) exist so a status colour is chosen
+ * by meaning, never by picking a Tailwind shade at the call site.
+ */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: 222 47% 8%;
-    --foreground: 210 40% 96%;
-    --card: 222 47% 11%;
-    --card-foreground: 210 40% 96%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-    --primary: 210 40% 96%;
-    --primary-foreground: 222 47% 11%;
-    --border: 217 33% 20%;
-    --input: 217 33% 20%;
-    --ring: 213 27% 84%;
-  }
+:root {
+  --background: 222 24% 5%;
+  --foreground: 213 31% 91%;
+
+  --card: 222 22% 7%;
+  --card-foreground: 213 31% 91%;
+
+  --muted: 218 20% 12%;
+  --muted-foreground: 215 16% 57%;
+
+  --primary: 213 31% 91%;
+  --primary-foreground: 222 24% 7%;
+
+  --border: 217 19% 16%;
+  --input: 217 19% 16%;
+  --ring: 213 94% 68%;
+
+  --radius: 0.5rem;
+
+  /* Elevated surface for panels sitting on top of a card. */
+  --surface: 220 21% 9%;
+
+  /* Policy and status semantics. */
+  --allow: 142 69% 45%;
+  --gate: 38 92% 55%;
+  --deny: 0 72% 58%;
+  --agent: 217 91% 65%;
+  --tool: 262 83% 70%;
+  --neutral: 215 16% 57%;
 }
 
 * {
   border-color: hsl(var(--border));
 }
 
+html {
+  color-scheme: dark;
+}
+
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 /* Always-visible focus indicator for keyboard users. */
 :focus-visible {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
+}
+
+@layer components {
+  /*
+   * Faint grid backdrop. Purely decorative, so it is hidden from assistive
+   * technology by virtue of being a background rather than an element, and it
+   * sits behind content at very low contrast so it never competes with text.
+   */
+  .ag-grid-backdrop {
+    background-image:
+      linear-gradient(hsl(var(--border) / 0.35) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.35) 1px, transparent 1px);
+    background-size: 44px 44px;
+    background-position: -1px -1px;
+  }
+
+  .ag-card {
+    @apply rounded-lg border border-border bg-card;
+  }
+
+  /* Tabular figures keep metric columns from jittering as values change. */
+  .ag-numeric {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/*
+ * Print styles for the evidence report.
+ *
+ * An evidence bundle gets attached to incident reviews and audit packets, so it
+ * has to survive Cmd-P. Navigation, controls, and the dark ground are dropped;
+ * what remains is the record itself on white.
+ */
+@media print {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 40%;
+    --border: 214 32% 85%;
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  .ag-no-print {
+    display: none !important;
+  }
+
+  .ag-grid-backdrop {
+    background-image: none;
+  }
+
+  /* Keep a section and its heading together across a page break. */
+  .ag-print-block {
+    break-inside: avoid;
+  }
+
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.75em;
+    color: #555;
+  }
+}
+
+/* Respect a user's reduced-motion preference for the live-run pulse. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

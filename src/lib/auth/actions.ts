@@ -23,7 +23,7 @@ export async function devSignInAction(
     await signIn("dev", {
       email,
       name: name || undefined,
-      redirectTo: "/rooms",
+      redirectTo: "/dashboard",
     });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -35,7 +35,7 @@ export async function devSignInAction(
 }
 
 export async function githubSignInAction(): Promise<void> {
-  await signIn("github", { redirectTo: "/rooms" });
+  await signIn("github", { redirectTo: "/dashboard" });
 }
 
 export async function signOutAction(): Promise<void> {

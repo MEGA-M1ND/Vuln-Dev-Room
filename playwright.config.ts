@@ -15,7 +15,25 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        // Some CI images ship a Chromium that does not match the revision this
+        // Playwright version would download, and cannot reach the download CDN
+        // to fetch the matching one. Point at the local binary when the
+        // environment provides one; otherwise use Playwright's own.
+        ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
+          ? {
+              launchOptions: {
+                executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH,
+              },
+            }
+          : {}),
+      },
+    },
+  ],
   webServer: process.env.E2E_NO_SERVER
     ? undefined
     : {

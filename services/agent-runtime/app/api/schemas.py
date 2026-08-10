@@ -77,3 +77,35 @@ class ReviewRunRequest(BaseModel):
     task) before this is called."""
 
     sourceRunId: str
+
+
+class BlastRadiusRequestBody(BaseModel):
+    """A blast-radius query.
+
+    Exactly one of `description` / `targetPath` / `targetSymbol` is expected;
+    when more than one is supplied the explicit target wins over the prose,
+    because a path the asker typed is better evidence of intent than a sentence
+    we have to guess at.
+    """
+
+    roomId: str
+    owner: str
+    repo: str
+    revision: str = "HEAD"
+    description: str | None = None
+    targetPath: str | None = None
+    targetSymbol: str | None = None
+    criticalPaths: list[str] = Field(default_factory=list)
+    # The requester's room role, used to tune summary depth only.
+    audience: str = "ENGINEER"
+
+
+class BlastRadiusResponseBody(BaseModel):
+    seeds: list[str]
+    affectedFiles: list[dict]
+    contractsTouched: list[str]
+    apiEndpointsTouched: list[str]
+    owners: list[dict]
+    summary: str
+    fileCount: int
+    truncated: bool

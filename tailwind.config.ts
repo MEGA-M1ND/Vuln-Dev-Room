@@ -22,6 +22,14 @@ const config: Config = {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
         },
+        surface: "hsl(var(--surface))",
+        // Semantic status colours. Named by meaning so a call site asks for
+        // "denied", not for a particular red.
+        allow: "hsl(var(--allow))",
+        gate: "hsl(var(--gate))",
+        deny: "hsl(var(--deny))",
+        agent: "hsl(var(--agent))",
+        tool: "hsl(var(--tool))",
       },
       borderRadius: {
         lg: "var(--radius)",
