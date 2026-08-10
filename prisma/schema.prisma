@@ -268,19 +268,26 @@ model User {
   handoffsFrom         HandoffCard[]            @relation("HandoffFrom")
   handoffsTo           HandoffCard[]            @relation("HandoffTo")
   handoffsAcknowledged HandoffCard[]            @relation("HandoffAcknowledgedBy")
+  handoffApprovals     HandoffApproval[]        @relation("HandoffApprovalReviewer")
 
   @@index([email])
 }
 
 model Room {
-  id             String   @id @default(cuid())
-  name           String
-  slug           String   @unique
-  repositoryName String?
-  repositoryUrl  String?
-  createdById    String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  name                  String
+  slug                  String   @unique
+  repositoryName        String?
+  repositoryUrl         String?
+  createdById           String
+  // Blast-radius pivot, Feature 3: a handoff scoring at or above this (0-100,
+  // higher = riskier) requires approval before it can be acknowledged; below
+  // it, the recipient can acknowledge directly. Team-configured on purpose —
+  // the brief is explicit that teams will disagree on sensitivity, and a
+  // hardcoded threshold would force one team's tolerance onto every other room.
+  riskApprovalThreshold Int      @default(50)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   createdBy               User                     @relation("RoomCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
   memberships             RoomMembership[]
@@ -906,6 +913,13 @@ model HandoffCard {
   blastRadiusResultId String?
 
   status           HandoffCardStatus @default(PENDING)
+  /// 0-100, higher = riskier. Null when nothing was scored — a card with no
+  /// cited blast-radius result has no evidence to score against, and forcing
+  /// a number out of nothing would be a fabricated verdict, not a heuristic.
+  riskScore        Int?
+  /// What drove the score, in plain language — so a reviewer sees WHY a card
+  /// needs approval, not just that it does.
+  riskFactorsJson  Json?
   acknowledgedById String?
   acknowledgedAt   DateTime?
   /// The run this handoff was emitted from, when it came from an agent. Unique
@@ -924,10 +938,29 @@ model HandoffCard {
   acknowledgedBy    User?                   @relation("HandoffAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
   blastRadiusResult BlastRadiusQueryResult? @relation(fields: [blastRadiusResultId], references: [id], onDelete: SetNull)
 
+  approvals HandoffApproval[]
+
   @@index([roomId, createdAt])
   @@index([taskId, createdAt])
   @@index([status, createdAt])
   @@index([toUserId, status])
+}
+
+/// A reviewer's answer on a NEEDS_APPROVAL handoff card. Append-only, mirroring
+/// `ApprovalDecision`: a changed mind is a second row, so the record shows the
+/// full deliberation rather than only its conclusion.
+model HandoffApproval {
+  id            String   @id @default(cuid())
+  handoffCardId String
+  reviewerId    String
+  approved      Boolean
+  comment       String?
+  createdAt     DateTime @default(now())
+
+  handoffCard HandoffCard @relation(fields: [handoffCardId], references: [id], onDelete: Cascade)
+  reviewer    User        @relation("HandoffApprovalReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  @@index([handoffCardId, createdAt])
 }
 
 model BlastRadiusQueryResult {

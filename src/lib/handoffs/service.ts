@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Prisma } from "@prisma/client";
+import type { MembershipRole, Prisma } from "@prisma/client";
 
 import { ApiError } from "@/lib/api/errors";
 import { prisma } from "@/lib/db/client";
@@ -9,6 +9,11 @@ import type {
   HandoffCard,
   HandoffTestsRun,
 } from "@/contracts/handoffs";
+import {
+  requiresApproval,
+  scoreHandoffRisk,
+  type RiskFactor,
+} from "@/lib/handoffs/risk-score";
 
 /**
  * Typed handoff cards.
@@ -18,10 +23,67 @@ import type {
  *    reported what it actually did (`createHandoffCardFromRun`).
  *  - Manual: a human hands off work they did themselves (`createHandoffCard`).
  *
- * Feature 3 will route a high-risk card through NEEDS_APPROVAL -> APPROVED
- * before `acknowledge` accepts it; this file intentionally does not gate
- * anything yet — see the brief for Feature 2.
+ * Feature 3: a manual handoff that cites a blast-radius result is scored
+ * against the room's configured threshold and, if it clears it, starts life
+ * NEEDS_APPROVAL instead of PENDING — `approveHandoffCard` is the only way out
+ * of that state. An automatically-emitted card (from a run) has no cited
+ * result to score against yet — the built-in runtime does not run blast-radius
+ * analysis on itself before finishing — so it always starts PENDING, exactly
+ * as it did before this feature. Extending that is future work, not a
+ * silent gap: scoring nothing is a documented decision, not a missed one.
  */
+
+/** Shape of `BlastRadiusQueryResult.resultJson`, as written by
+ * `src/lib/blast-radius/service.ts`. Read defensively — this is JSON crossing
+ * a service boundary, not a typed return value. */
+type StoredBlastRadiusResult = {
+  affectedFiles?: Array<{ importedBy?: number }>;
+  contractsTouched?: string[];
+  owners?: Array<{ owners?: Array<{ userId?: string | null }> }>;
+};
+
+async function scoreAgainstCitedResult(params: {
+  roomId: string;
+  fromUserId: string | null;
+  blastRadiusResultId: string | null;
+}): Promise<{ score: number; factors: RiskFactor[] } | null> {
+  if (!params.blastRadiusResultId) return null;
+
+  const cited = await prisma.blastRadiusQueryResult.findFirst({
+    where: { id: params.blastRadiusResultId, roomId: params.roomId },
+    select: { fileCount: true, resultJson: true },
+  });
+  if (!cited) return null;
+
+  const result = (cited.resultJson ?? {}) as StoredBlastRadiusResult;
+  const touchesCriticalPath = (result.contractsTouched?.length ?? 0) > 0;
+  const maxImportedBy = (result.affectedFiles ?? []).reduce(
+    (max, f) => Math.max(max, f.importedBy ?? 0),
+    0,
+  );
+
+  // Stays null — neutral, not "unfamiliar" — whenever there is no ownership
+  // evidence to check against: either no `fromUserId` (an agent-authored
+  // card), or a cited result with no owners at all (git had no history for
+  // the affected paths). Only a non-empty owners list that excludes this
+  // person is real evidence of unfamiliarity.
+  let actorFamiliarWithPaths: boolean | null = null;
+  if (params.fromUserId) {
+    const ownerIds = (result.owners ?? []).flatMap(
+      (entry) => entry.owners?.map((o) => o.userId).filter(Boolean) ?? [],
+    );
+    if (ownerIds.length > 0) {
+      actorFamiliarWithPaths = ownerIds.includes(params.fromUserId);
+    }
+  }
+
+  return scoreHandoffRisk({
+    affectedFileCount: cited.fileCount,
+    touchesCriticalPath,
+    actorFamiliarWithPaths,
+    maxImportedBy,
+  });
+}
 
 function toHandoffCard(row: {
   id: string;
@@ -36,6 +98,8 @@ function toHandoffCard(row: {
   openQuestions: string[];
   blastRadiusResultId: string | null;
   status: string;
+  riskScore: number | null;
+  riskFactorsJson: Prisma.JsonValue;
   acknowledgedById: string | null;
   acknowledgedBy: { id: string; name: string | null } | null;
   acknowledgedAt: Date | null;
@@ -56,6 +120,8 @@ function toHandoffCard(row: {
     openQuestions: row.openQuestions,
     blastRadiusResultId: row.blastRadiusResultId,
     status: row.status as HandoffCard["status"],
+    riskScore: row.riskScore,
+    riskFactors: (row.riskFactorsJson as RiskFactor[] | null) ?? [],
     acknowledgedBy: row.acknowledgedBy,
     acknowledgedAt: row.acknowledgedAt?.toISOString() ?? null,
     runId: row.runId,
@@ -108,6 +174,27 @@ export async function createHandoffCard(params: {
     }
   }
 
+  const risk = await scoreAgainstCitedResult({
+    roomId,
+    fromUserId: from.userId,
+    blastRadiusResultId: input.blastRadiusResultId ?? null,
+  });
+
+  // Only fetched when there is something to gate: a card with no risk score
+  // has nothing to compare against a threshold, so the extra read is skipped
+  // for the common case (no cited blast-radius result).
+  const initialStatus = risk
+    ? await (async () => {
+        const room = await prisma.room.findUniqueOrThrow({
+          where: { id: roomId },
+          select: { riskApprovalThreshold: true },
+        });
+        return requiresApproval(risk.score, room.riskApprovalThreshold)
+          ? "NEEDS_APPROVAL"
+          : "PENDING";
+      })()
+    : "PENDING";
+
   const row = await prisma.handoffCard.create({
     data: {
       roomId,
@@ -122,7 +209,11 @@ export async function createHandoffCard(params: {
         : undefined,
       openQuestions: input.openQuestions,
       blastRadiusResultId: input.blastRadiusResultId ?? null,
-      status: "PENDING",
+      status: initialStatus,
+      riskScore: risk?.score ?? null,
+      riskFactorsJson: risk
+        ? (risk.factors as unknown as Prisma.InputJsonValue)
+        : undefined,
     },
     include: INCLUDE,
   });
@@ -246,15 +337,14 @@ export async function acknowledgeHandoffCard(params: {
       "This handoff has already been acknowledged.",
     );
   }
-  if (card.status !== "PENDING") {
-    // NEEDS_APPROVAL / APPROVED — Feature 3's gate, not reachable yet from
-    // anything Feature 2 creates, but guarded so the state machine is honest
-    // the moment it becomes reachable.
+  if (card.status === "NEEDS_APPROVAL") {
     throw new ApiError(
       "BAD_REQUEST",
       "This handoff requires approval before it can be acknowledged.",
     );
   }
+  // PENDING (never gated) and APPROVED (cleared the gate) are the two states
+  // acknowledgement accepts from.
   if (
     !params.actingUserIsOwner &&
     card.toUserId !== params.actingUserId
@@ -274,6 +364,87 @@ export async function acknowledgeHandoffCard(params: {
     },
     include: INCLUDE,
   });
+
+  return toHandoffCard(row);
+}
+
+/**
+ * Approve a NEEDS_APPROVAL card, clearing the gate so its recipient can
+ * acknowledge it. Eligible reviewers are a room OWNER/REVIEWER, or someone the
+ * blast-radius result's git-derived ownership names as an owner of an
+ * affected path — the brief's "owner of the affected area from Feature 1's
+ * ownership data". Self-approval is refused for the same reason it is refused
+ * on `ApprovalRequest` elsewhere in this codebase: an approval the author can
+ * grant themselves is not a second look.
+ *
+ * There is no reject action: the four card statuses the brief specifies have
+ * no state for "sent back" — only PENDING, NEEDS_APPROVAL, APPROVED,
+ * ACKNOWLEDGED — so a reviewer who is not satisfied says so in the comment and
+ * leaves the card at the gate rather than the service inventing a fifth state.
+ */
+export async function approveHandoffCard(params: {
+  cardId: string;
+  roomId: string;
+  reviewerId: string;
+  reviewerRole: MembershipRole;
+  comment?: string | null;
+}): Promise<HandoffCard> {
+  const card = await prisma.handoffCard.findFirst({
+    where: { id: params.cardId, roomId: params.roomId },
+  });
+  if (!card) {
+    throw new ApiError("NOT_FOUND", "Handoff card not found.");
+  }
+  if (card.status !== "NEEDS_APPROVAL") {
+    throw new ApiError(
+      "BAD_REQUEST",
+      "This handoff is not waiting for approval.",
+    );
+  }
+  if (card.fromUserId && card.fromUserId === params.reviewerId) {
+    throw new ApiError(
+      "FORBIDDEN",
+      "You cannot approve a handoff you authored yourself. Approval requires a second person.",
+    );
+  }
+
+  const isReviewerRole =
+    params.reviewerRole === "OWNER" || params.reviewerRole === "REVIEWER";
+
+  let isPathOwner = false;
+  if (!isReviewerRole && card.blastRadiusResultId) {
+    const cited = await prisma.blastRadiusQueryResult.findFirst({
+      where: { id: card.blastRadiusResultId, roomId: params.roomId },
+      select: { resultJson: true },
+    });
+    const result = (cited?.resultJson ?? {}) as StoredBlastRadiusResult;
+    isPathOwner = (result.owners ?? []).some((entry) =>
+      entry.owners?.some((o) => o.userId === params.reviewerId),
+    );
+  }
+
+  if (!isReviewerRole && !isPathOwner) {
+    throw new ApiError(
+      "FORBIDDEN",
+      "Only a room reviewer or owner, or an owner of the affected code, may approve this handoff.",
+    );
+  }
+
+  const [, row] = await prisma.$transaction([
+    prisma.handoffApproval.create({
+      data: {
+        handoffCardId: card.id,
+        reviewerId: params.reviewerId,
+        approved: true,
+        comment: params.comment ?? null,
+      },
+    }),
+    prisma.handoffCard.update({
+      where: { id: card.id },
+      data: { status: "APPROVED" },
+      include: INCLUDE,
+    }),
+  ]);
 
   return toHandoffCard(row);
 }

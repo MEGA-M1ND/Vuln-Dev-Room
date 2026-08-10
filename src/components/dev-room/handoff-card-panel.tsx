@@ -19,13 +19,18 @@ import { cn } from "@/lib/utils";
  * not a second timeline).
  *
  * For a run from the built-in runtime or an external adapter, the card is
- * created automatically once the run succeeds — this panel only displays it
- * and offers the Acknowledge action. Nothing here gates anything; that is
- * Feature 3.
+ * created automatically once the run succeeds. A card that cited a
+ * blast-radius result and scored at or above the room's threshold arrives
+ * NEEDS_APPROVAL; the Approve button here is a visibility convenience for the
+ * common case (room reviewers/owners) — the full eligibility rule, including a
+ * git-derived owner of the affected paths, is enforced server-side in
+ * `approveHandoffCard`, so a path-owner who is a plain engineer can still
+ * approve by calling the API even though this button does not show for them.
  */
 export function HandoffCardPanel({ run }: { run: RunDTO }) {
   const { role, currentUserId } = useBoard();
   const canAct = can(role, "run:handoff");
+  const canApprove = role === "OWNER" || role === "REVIEWER";
 
   const [card, setCard] = React.useState<HandoffCard | null>(null);
   const [loaded, setLoaded] = React.useState(false);
@@ -76,11 +81,34 @@ export function HandoffCardPanel({ run }: { run: RunDTO }) {
     }
   }
 
+  async function approve() {
+    if (!card || pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      const data = await apiFetch<{ card: HandoffCard }>(
+        `/api/handoffs/${card.id}/approve`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      setCard(data.card);
+    } catch (err) {
+      setError(
+        err instanceof ApiClientError
+          ? err.message
+          : "Could not approve the handoff.",
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+
   if (!loaded || !card) return null;
 
   const isRecipient = card.toUserId === currentUserId;
   const canAcknowledge =
-    card.status === "PENDING" && canAct && (isRecipient || role === "OWNER");
+    (card.status === "PENDING" || card.status === "APPROVED") &&
+    canAct &&
+    (isRecipient || role === "OWNER");
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
@@ -117,13 +145,46 @@ export function HandoffCardPanel({ run }: { run: RunDTO }) {
         </div>
       ) : null}
 
+      {card.riskScore !== null ? (
+        <div className="mt-2 rounded border border-slate-800 bg-slate-900/60 p-2">
+          <p className="text-xs font-medium text-slate-300">
+            Risk score: <span className={riskTone(card.riskScore)}>{card.riskScore}</span>
+            <span className="text-slate-500">/100</span>
+          </p>
+          {card.riskFactors.length > 0 ? (
+            <ul className="mt-1 space-y-0.5 text-[11px] text-slate-400">
+              {card.riskFactors.map((f) => (
+                <li key={f.key}>
+                  +{f.points} — {f.reason}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
       {error ? (
         <p className="mt-2 text-xs text-red-400" role="alert">
           {error}
         </p>
       ) : null}
 
-      {card.status === "PENDING" ? (
+      {card.status === "NEEDS_APPROVAL" ? (
+        <div className="mt-3">
+          <Button
+            size="sm"
+            onClick={approve}
+            disabled={!canApprove || pending}
+            title={
+              !canApprove
+                ? "Only a room reviewer or owner (or an owner of the affected code) can approve this."
+                : undefined
+            }
+          >
+            {pending ? "Approving…" : "Approve"}
+          </Button>
+        </div>
+      ) : card.status === "PENDING" || card.status === "APPROVED" ? (
         <div className="mt-3">
           <Button
             size="sm"
@@ -148,6 +209,12 @@ export function HandoffCardPanel({ run }: { run: RunDTO }) {
       )}
     </section>
   );
+}
+
+function riskTone(score: number): string {
+  if (score >= 70) return "text-red-400";
+  if (score >= 40) return "text-amber-400";
+  return "text-green-400";
 }
 
 const STATUS_STYLES: Record<HandoffCard["status"], string> = {

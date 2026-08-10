@@ -27,6 +27,7 @@ import { GET as getRuns } from "@/app/api/runs/route";
 import { GET as getRepositories } from "@/app/api/github/repositories/route";
 import { GET as getHandoffs, POST as postHandoff } from "@/app/api/handoffs/route";
 import { POST as postAcknowledge } from "@/app/api/handoffs/[handoffId]/acknowledge/route";
+import { POST as postApprove } from "@/app/api/handoffs/[handoffId]/approve/route";
 
 const ROUTES = [
   {
@@ -88,6 +89,19 @@ describe("handoff mutation endpoints authenticate before touching the database",
         "http://localhost/api/handoffs/does-not-exist/acknowledge",
         { method: "POST" },
       ),
+      { params: Promise.resolve({ handoffId: "does-not-exist" }) },
+    );
+
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("UNAUTHENTICATED");
+  });
+
+  it("POST /api/handoffs/:id/approve answers an anonymous caller with 401, not a database lookup", async () => {
+    const response = await postApprove(
+      new NextRequest("http://localhost/api/handoffs/does-not-exist/approve", {
+        method: "POST",
+      }),
       { params: Promise.resolve({ handoffId: "does-not-exist" }) },
     );
 

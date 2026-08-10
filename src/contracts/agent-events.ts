@@ -197,13 +197,17 @@ export {
  */
 export {
   HANDOFF_CARD_STATUSES,
+  approveHandoffCardSchema,
   createHandoffCardSchema,
   handoffTestsRunSchema,
 } from "@/contracts/handoffs";
 export type {
+  ApproveHandoffCardInput,
   CreateHandoffCardInput,
+  HandoffApproval,
   HandoffCard,
   HandoffCardStatusValue,
+  HandoffRiskFactor,
   HandoffTestsRun,
 } from "@/contracts/handoffs";
 

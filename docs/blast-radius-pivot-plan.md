@@ -355,15 +355,30 @@ working.
 
 ---
 
-## 6. Open decisions
+## 6. Decisions made after this plan was written
 
-1. **Feature 3's approval flow (§1.4).** Reuse `ApprovalRequest` (recommended —
-   one audit trail) or build the literal four-state flow on the card (two
-   parallel approval systems)? This changes commit 3's shape materially.
-2. **Seniority (§1.3).** Confirm that `MembershipRole` + git-blame familiarity is
-   an acceptable stand-in, or say where real seniority data should come from.
-3. **NL query → seed resolution.** Turning "the auth flow" into seed files needs
-   either an LLM call or path/symbol heuristics. Plan assumes: heuristics first
-   (path and symbol substring match over the tracked-file list), LLM only to
-   *summarize*. An LLM-driven seed resolver can follow if the heuristic proves
-   too blunt.
+1. **Feature 3's approval flow (§1.4) — resolved: build the literal four-state
+   flow on the card.** This plan recommended reusing `ApprovalRequest` for one
+   audit trail; asked directly, the decision was to build the parallel flow as
+   originally specified instead. Implemented as `HandoffApproval`
+   (append-only, mirroring `ApprovalDecision`'s own pattern) plus
+   `HandoffCard.status` moving through all four declared values. The tradeoff
+   this plan flagged is now real: a room has two independent approval
+   concepts — `ApprovalRequest` gating agent-run actions,
+   `HandoffCard`/`HandoffApproval` gating handoff pickup — with separate
+   tables, separate reviewer-eligibility rules, and separate audit trails. If
+   the two are ever unified, the migration path is to make `ApprovalRequest`
+   generic over what it gates (a `handoffCardId` alongside its existing
+   `runId`) rather than teaching `HandoffCard` to grow a third status shape.
+2. **Seniority (§1.3) — resolved: `MembershipRole` + git-blame familiarity.**
+   Implemented as designed: `scoreHandoffRisk`'s `unfamiliarActor` factor reads
+   whether the handoff's author appears among a cited blast-radius result's
+   git-derived owners, treating "no ownership data at all" as neutral rather
+   than "definitely unfamiliar" (a real bug caught in testing — the service
+   layer originally collapsed both cases to `false`, which a dedicated
+   integration test now pins against regressing).
+3. **NL query → seed resolution — resolved as planned.** Heuristic path/symbol
+   substring matching over the tracked-file list, no LLM call in the
+   resolution path itself; the model is used only to write the plain-language
+   summary of what the heuristic and graph walk found. Not revisited — no
+   evidence yet that it is too blunt.

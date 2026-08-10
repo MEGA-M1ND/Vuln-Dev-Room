@@ -10,11 +10,10 @@ import { z } from "zod";
  * run* and carries no work content — that says "you own this run now", this
  * says "here is what I did and what is unresolved".
  *
- * All four `HandoffCardStatus` values exist from the start even though this
- * feature only ever produces PENDING and ACKNOWLEDGED: the risk-scored
- * approval gate (Feature 3) routes high-risk work through
- * NEEDS_APPROVAL -> APPROVED before it can be acknowledged, and declaring the
- * full enum now means that arrives without a second migration.
+ * All four `HandoffCardStatus` values are live: a manual handoff that cites a
+ * blast-radius result scoring at or above the room's configured threshold
+ * starts NEEDS_APPROVAL, and `POST /api/handoffs/:id/approve` is the only way
+ * out of that state before it can be acknowledged.
  */
 
 export const HANDOFF_CARD_STATUSES = [
@@ -56,6 +55,21 @@ export const createHandoffCardSchema = z.object({
 
 export type CreateHandoffCardInput = z.infer<typeof createHandoffCardSchema>;
 
+/** One scored factor behind a risk score — see `src/lib/handoffs/risk-score.ts`. */
+export type HandoffRiskFactor = {
+  key: "blast_radius" | "critical_path" | "unfamiliar_actor" | "reversibility";
+  points: number;
+  reason: string;
+};
+
+/** A reviewer's approval of a NEEDS_APPROVAL card. */
+export type HandoffApproval = {
+  id: string;
+  reviewer: { id: string; name: string | null };
+  comment: string | null;
+  createdAt: string;
+};
+
 export type HandoffCard = {
   id: string;
   roomId: string;
@@ -69,9 +83,19 @@ export type HandoffCard = {
   openQuestions: string[];
   blastRadiusResultId: string | null;
   status: HandoffCardStatusValue;
+  /** 0-100, higher = riskier. Null when nothing was cited to score against. */
+  riskScore: number | null;
+  riskFactors: HandoffRiskFactor[];
   acknowledgedBy: { id: string; name: string | null } | null;
   acknowledgedAt: string | null;
   runId: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+/** Approve a NEEDS_APPROVAL handoff. An optional note for the record. */
+export const approveHandoffCardSchema = z.object({
+  comment: z.string().trim().max(2_000).optional(),
+});
+
+export type ApproveHandoffCardInput = z.infer<typeof approveHandoffCardSchema>;

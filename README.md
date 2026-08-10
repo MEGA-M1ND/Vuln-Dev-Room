@@ -522,8 +522,93 @@ per-file approval rather than whole-run approval.
 
 ---
 
+## Blast-radius pivot: three coordination features
+
+The process infrastructure large orgs get for free from CI and staged review —
+blast-radius awareness, explicit handoffs, risk-calibrated review — built as
+three features on the existing room/event model. Design rationale, including
+where each departs from a literal reading of its own brief and why, lives in
+[`docs/blast-radius-pivot-plan.md`](docs/blast-radius-pivot-plan.md).
+
+### 1. Blast-radius query — "what would touching X affect?"
+
+Static analysis of the room's connected repository, run before a feature is
+discussed or an agent is pointed at a task — a code-derived answer, not a
+stale doc.
+
+- Describe an area in prose, or name a file/symbol directly
+- Import-graph analysis (JS/TS and Python) walked **in reverse** from the
+  target: what would break is what imports it, transitively
+- Files matching the room's configured critical paths and touched API routes
+  (Next.js and FastAPI) called out explicitly
+- Ownership derived from `git log`, recency-weighted, with git authors linked
+  to room members by email where possible
+- A plain-language summary tuned by the requester's room role (depth only —
+  the underlying facts are never withheld from anyone)
+- The room converges on one answer: results are stored and broadcast by id, so
+  two people asking about the same change see the same impact map
+- Analysis lives in the Python runtime (`services/agent-runtime/app/blastradius/`)
+  rather than a new service — it reuses the runtime's existing repo-cloning,
+  auth, and model-provider plumbing, and needs no sandbox since it only parses,
+  never executes, repository code
+
+### 2. Typed handoff cards — explicit, structured, acknowledged
+
+Replaces "hey I did the auth part" with a card the receiver must explicitly
+acknowledge: what changed, what was tested, what is still open, and
+(optionally) a citation to a specific blast-radius result.
+
+- Created automatically when a run succeeds — from the run's own recorded
+  summary and test result, never a self-report generated after the fact — or
+  manually, when a human hands off work they did themselves
+- Distinct from the existing run-ownership handoff
+  (`RunIntervention{kind: HANDOFF}`): that transfers *who owns a live run*;
+  this carries the actual work content
+- Acknowledgement is restricted to the named recipient, or a room Owner
+  standing in for them
+
+### 3. Risk-scored approval gates
+
+Routes low-risk handoffs straight through and requires an explicit approval
+for high-risk ones, instead of uniform friction on everything.
+
+- A pure, unit-tested heuristic (`src/lib/handoffs/risk-score.ts`) scores a
+  handoff 0–100 from four attributable factors: blast-radius size, whether a
+  critical path was touched, whether the author has git history in the
+  affected paths, and reversibility (how widely-imported the most central
+  affected file is)
+- The threshold is configurable **per room** (`Room.riskApprovalThreshold`,
+  default 50) — teams disagree on sensitivity, so nothing is hardcoded
+- A card scoring at or above the threshold starts `NEEDS_APPROVAL`; `Approve`
+  clears it to `APPROVED`, after which the recipient can acknowledge as normal
+- Eligible approvers are a room Owner/Reviewer, or a git-derived owner of the
+  affected paths (self-approval is refused, same as the existing
+  `ApprovalRequest` gate)
+- Approval history is append-only (`HandoffApproval`, mirroring the existing
+  `ApprovalDecision` pattern) — a reviewed decision is a durable record, not a
+  status flag that a second look could silently overwrite. This is a second,
+  independent approval concept alongside the existing `ApprovalRequest` gate
+  for agent runs — deliberate, per explicit direction, rather than the plan
+  doc's original recommendation to extend `ApprovalRequest`; see the plan
+  doc's open decisions for the tradeoff either way carries
+
+**Extending the weights.** Every factor's point budget is a named constant at
+the top of `risk-score.ts` (`BLAST_RADIUS_MAX`, `CRITICAL_PATH_POINTS`,
+`UNFAMILIAR_ACTOR_POINTS`, `REVERSIBILITY_MAX`) with the saturation point that
+earns the full score documented alongside it. Retuning sensitivity for one
+org's tolerance is a constant change plus a re-run of
+`src/lib/handoffs/risk-score.test.ts`, which pins the boundary behavior
+(nothing exceeds 100, familiarity is never penalized as unfamiliarity, a
+critical-path touch alone can clear a default threshold). Per-room weighting
+(as opposed to only a per-room threshold) is not implemented — see the plan
+doc's open decisions.
+
+---
+
 ## Related documentation
 
+- [`docs/blast-radius-pivot-plan.md`](docs/blast-radius-pivot-plan.md) — the
+  migration plan and design rationale for the three features above
 - [`docs/agent-dev-room-foundations.md`](docs/agent-dev-room-foundations.md) —
   the multiplayer run/room foundations this control plane is layered on
 - [`docs/agent-event-contract.md`](docs/agent-event-contract.md) — ingestion
