@@ -19,6 +19,7 @@ import { RunElapsed } from "@/components/dev-room/run-elapsed";
 import { RunWatchers } from "@/components/dev-room/run-watchers";
 import { RunForkLineage } from "@/components/dev-room/run-forks";
 import { RunDelivery } from "@/components/dev-room/run-delivery";
+import { HandoffCardPanel } from "@/components/dev-room/handoff-card-panel";
 import {
   SavePlaybookAction,
   StartWithPlaybook,
@@ -435,6 +436,8 @@ export function AgentRunPanel({ taskId }: { taskId: string }) {
       ) : null}
 
       {run ? <RunDelivery run={run} /> : null}
+
+      {run && run.status === "SUCCEEDED" ? <HandoffCardPanel run={run} /> : null}
 
       {artifacts.length > 0 ? <ArtifactViews artifacts={artifacts} /> : null}
     </div>

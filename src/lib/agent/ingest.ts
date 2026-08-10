@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db/client";
 import { env } from "@/env";
 import { ApiError } from "@/lib/api/errors";
 import { ACTIVE_RUN_STATUSES, isTerminal } from "@/lib/agent/interventions";
+import { createHandoffCardFromRun } from "@/lib/handoffs/service";
 import {
   CONTRACT_VERSION,
   type AgentEvent,
@@ -40,6 +41,7 @@ const EVENT_TYPE_MAP: Record<AgentEventType, RunEventType> = {
   decision_recorded: "DECISION_RECORDED",
   instruction_added: "REDIRECT_REQUESTED",
   handoff_requested: "HANDOFF_REQUESTED",
+  handoff_prepared: "HANDOFF_PREPARED",
   risk_flagged: "RISK_FLAGGED",
   pr_linked: "PR_LINKED",
   pr_updated: "PR_UPDATED",
@@ -245,6 +247,22 @@ async function ingestOne(event: AgentEvent): Promise<AgentEventResult> {
 
         return row;
       });
+
+      // A structured handoff, reported by an external adapter the same way
+      // the built-in runtime reports one from `_finalize()`: build the durable
+      // HandoffCard from what was actually recorded, not from a self-report
+      // that skipped ingestion's own validation.
+      if (event.eventType === "handoff_prepared") {
+        await createHandoffCardFromRun({
+          runId: run.id,
+          roomId: run.roomId,
+          taskId: run.taskId,
+          fromActorLabel: event.agent.provider,
+          diffSummary: event.payload?.summary ?? "",
+          testsRun: event.payload?.testsRun,
+          openQuestions: event.payload?.openQuestions,
+        });
+      }
 
       return { eventId: created.id, runId: run.id, duplicate: false };
     } catch (err) {

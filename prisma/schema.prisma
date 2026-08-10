@@ -161,6 +161,11 @@ enum RunEventType {
   EVIDENCE_FINALIZED
   // The isolated workspace was torn down.
   SANDBOX_DESTROYED
+  // --- Blast-radius pivot, Feature 2: a structured HandoffCard was prepared
+  // for a task, either by the built-in runtime finishing a run or by an
+  // external adapter reporting the same. Distinct from HANDOFF_REQUESTED,
+  // which is a RunIntervention transferring ownership of a live run.
+  HANDOFF_PREPARED
 }
 
 /// What kind of human intervention was recorded against a run.
@@ -246,20 +251,23 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  createdRooms       Room[]                   @relation("RoomCreatedBy")
-  memberships        RoomMembership[]
-  createdTasks       AgentTask[]              @relation("TaskCreatedBy")
-  assignedTasks      AgentTask[]              @relation("TaskAssignee")
-  requestedRuns      AgentRun[]               @relation("RunRequestedBy")
-  ownedRuns          AgentRun[]               @relation("RunOwnedBy")
-  interventions      RunIntervention[]        @relation("InterventionAuthor")
-  createdPlaybooks   Playbook[]               @relation("PlaybookCreatedBy")
-  githubConnections  GitHubConnection[]       @relation("GitHubConnectionCreatedBy")
-  riskDismissals     RiskSignalDismissal[]    @relation("RiskDismissedBy")
-  createdPolicies    Policy[]                 @relation("PolicyCreatedBy")
-  approvalRequests   ApprovalRequest[]        @relation("ApprovalRequestedBy")
-  approvalDecisions  ApprovalDecision[]       @relation("ApprovalReviewer")
-  blastRadiusQueries BlastRadiusQueryResult[] @relation("BlastRadiusRequestedBy")
+  createdRooms         Room[]                   @relation("RoomCreatedBy")
+  memberships          RoomMembership[]
+  createdTasks         AgentTask[]              @relation("TaskCreatedBy")
+  assignedTasks        AgentTask[]              @relation("TaskAssignee")
+  requestedRuns        AgentRun[]               @relation("RunRequestedBy")
+  ownedRuns            AgentRun[]               @relation("RunOwnedBy")
+  interventions        RunIntervention[]        @relation("InterventionAuthor")
+  createdPlaybooks     Playbook[]               @relation("PlaybookCreatedBy")
+  githubConnections    GitHubConnection[]       @relation("GitHubConnectionCreatedBy")
+  riskDismissals       RiskSignalDismissal[]    @relation("RiskDismissedBy")
+  createdPolicies      Policy[]                 @relation("PolicyCreatedBy")
+  approvalRequests     ApprovalRequest[]        @relation("ApprovalRequestedBy")
+  approvalDecisions    ApprovalDecision[]       @relation("ApprovalReviewer")
+  blastRadiusQueries   BlastRadiusQueryResult[] @relation("BlastRadiusRequestedBy")
+  handoffsFrom         HandoffCard[]            @relation("HandoffFrom")
+  handoffsTo           HandoffCard[]            @relation("HandoffTo")
+  handoffsAcknowledged HandoffCard[]            @relation("HandoffAcknowledgedBy")
 
   @@index([email])
 }
@@ -285,6 +293,7 @@ model Room {
   policies                Policy[]
   policyDecisions         PolicyDecision[]
   blastRadiusQueryResults BlastRadiusQueryResult[]
+  handoffCards            HandoffCard[]
 
   @@index([createdById])
 }
@@ -347,10 +356,11 @@ model AgentTask {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  room      Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  assignee  User?      @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  createdBy User       @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
-  agentRuns AgentRun[]
+  room         Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  assignee     User?         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy    User          @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  agentRuns    AgentRun[]
+  handoffCards HandoffCard[]
 
   // Board fetch and column ordering: rooms/status/position.
   @@index([roomId, status, position])
@@ -849,6 +859,77 @@ model EvidenceReport {
 /// against, and a reference to a recomputed object would silently change
 /// meaning as the repository moved on. This is a snapshot of what was true when
 /// the question was asked, which is exactly what makes it citable later.
+/// Where a handoff sits. All four states exist from the start even though
+/// Feature 2 only ever produces PENDING and ACKNOWLEDGED: Feature 3 routes
+/// high-risk work through NEEDS_APPROVAL -> APPROVED, and declaring them now
+/// means that arrives without a second enum migration.
+enum HandoffCardStatus {
+  PENDING
+  NEEDS_APPROVAL
+  APPROVED
+  ACKNOWLEDGED
+}
+
+/// An explicit, structured handoff of work between two actors.
+///
+/// Replaces "hey I did the auth part" with something a receiver can act on:
+/// what changed, what was tested, what is still open, and what the change
+/// reaches. Deliberately distinct from RunIntervention{kind: HANDOFF}, which
+/// transfers *ownership of a run* and carries no work content — this says
+/// "here is what I did and what is unresolved", that one says "you own this
+/// run now".
+model HandoffCard {
+  id     String @id @default(cuid())
+  roomId String
+  taskId String
+
+  /// Actors are nullable-with-label because either side may be an AGENT, which
+  /// has no User row. `fromActorLabel` then carries "claude_code" and friends,
+  /// mirroring how RunEvent splits actorType from actorId.
+  fromUserId     String?
+  fromActorLabel String
+  toUserId       String?
+  toActorLabel   String
+
+  /// What changed, in prose. Populated from the run's own DIFF artifact when a
+  /// handoff is emitted automatically.
+  diffSummary   String
+  /// Structured test results as the agent actually recorded them.
+  testsRunJson  Json?
+  /// Blockers the receiver needs answered before picking this up.
+  openQuestions String[] @default([])
+
+  /// The impact map this handoff was reviewed against, if one was computed.
+  /// Points at a STORED result on purpose: a recomputed one would silently
+  /// change meaning as the repository moved on, and the whole value of citing
+  /// it is that it says what was true at handoff time.
+  blastRadiusResultId String?
+
+  status           HandoffCardStatus @default(PENDING)
+  acknowledgedById String?
+  acknowledgedAt   DateTime?
+  /// The run this handoff was emitted from, when it came from an agent. Unique
+  /// so the callback reporting a run's completion can be retried safely: a
+  /// second delivery for the same run finds the card already made rather than
+  /// duplicating it. Postgres permits many NULLs under a unique index, so
+  /// manually-created handoffs (no run behind them) are unaffected.
+  runId            String?           @unique
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  room              Room                    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  task              AgentTask               @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromUser          User?                   @relation("HandoffFrom", fields: [fromUserId], references: [id], onDelete: SetNull)
+  toUser            User?                   @relation("HandoffTo", fields: [toUserId], references: [id], onDelete: SetNull)
+  acknowledgedBy    User?                   @relation("HandoffAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  blastRadiusResult BlastRadiusQueryResult? @relation(fields: [blastRadiusResultId], references: [id], onDelete: SetNull)
+
+  @@index([roomId, createdAt])
+  @@index([taskId, createdAt])
+  @@index([status, createdAt])
+  @@index([toUserId, status])
+}
+
 model BlastRadiusQueryResult {
   id            String   @id @default(cuid())
   roomId        String
@@ -866,8 +947,9 @@ model BlastRadiusQueryResult {
   truncated     Boolean  @default(false)
   createdAt     DateTime @default(now())
 
-  room        Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  requestedBy User @relation("BlastRadiusRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
+  room         Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  requestedBy  User          @relation("BlastRadiusRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
+  handoffCards HandoffCard[]
 
   @@index([roomId, createdAt])
   @@index([requestedById])

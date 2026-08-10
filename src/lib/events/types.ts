@@ -22,6 +22,9 @@ export type RoomBroadcastEvent =
   // Blast radius: a new impact map was computed for this room. Carries only the
   // id — clients refetch the stored result so everyone sees the same answer
   // rather than each rendering its own copy of a payload.
-  | { type: "BLAST_RADIUS_UPDATED"; roomId: string; queryId: string };
+  | { type: "BLAST_RADIUS_UPDATED"; roomId: string; queryId: string }
+  // A handoff card was created or acknowledged. Payload-free for the same
+  // reason as the others — clients refetch the card list for the task/run.
+  | { type: "HANDOFF_CARD_UPDATED"; roomId: string; taskId: string };
 
 export type RoomBroadcastEventType = RoomBroadcastEvent["type"];

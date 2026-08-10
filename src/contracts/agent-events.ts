@@ -48,6 +48,10 @@ export const AGENT_EVENT_TYPES = [
   "decision_recorded",
   "instruction_added",
   "handoff_requested",
+  // Blast-radius pivot, Feature 2: a structured handoff of finished work,
+  // distinct from `handoff_requested` (which asks a human to transfer
+  // ownership of a still-running run). See the payload fields below.
+  "handoff_prepared",
   "risk_flagged",
   "pr_linked",
   "pr_updated",
@@ -115,6 +119,20 @@ const payloadSchema = z
     /** For risk_flagged / error_detected. */
     severity: z.enum(["info", "warning", "concern"]).optional(),
     detail: z.string().max(10_000).optional(),
+    /**
+     * For `handoff_prepared`. `summary` above carries the diff description —
+     * reused rather than duplicated, since both mean "what changed, in
+     * prose." These two are new: nothing else in this payload captures a
+     * structured test result or a receiver's open questions.
+     */
+    testsRun: z
+      .object({
+        passed: z.boolean(),
+        command: z.string().max(500).optional(),
+        exitCode: z.number().int().optional(),
+      })
+      .optional(),
+    openQuestions: z.array(z.string().max(500)).max(20).optional(),
   })
   .passthrough();
 
@@ -173,6 +191,22 @@ export {
   blastRadiusQuerySchema,
   runtimeBlastRadiusResponseSchema,
 } from "@/contracts/blast-radius";
+/**
+ * Typed handoff cards. See `@/contracts/handoffs` for the full reasoning on
+ * why the four-state status enum exists from the start.
+ */
+export {
+  HANDOFF_CARD_STATUSES,
+  createHandoffCardSchema,
+  handoffTestsRunSchema,
+} from "@/contracts/handoffs";
+export type {
+  CreateHandoffCardInput,
+  HandoffCard,
+  HandoffCardStatusValue,
+  HandoffTestsRun,
+} from "@/contracts/handoffs";
+
 export type {
   AffectedFile,
   BlastRadiusOwner,

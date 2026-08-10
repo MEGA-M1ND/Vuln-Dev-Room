@@ -657,8 +657,36 @@ def _finalize(
         )
     runs_db.update_run_status(run_id, "SUCCEEDED")
     recorder.event("RUN_SUCCEEDED", {"changedFiles": applied})
+    _record_handoff(recorder, final_state)
     _notify(notifier, status="SUCCEEDED")
     return "SUCCEEDED"
+
+
+def _record_handoff(recorder: Recorder, final_state: AgentState) -> None:
+    """Emit a structured handoff, populated from what the run actually did
+    rather than a self-report generated after the fact.
+
+    This is Feature 2's automatic path: the web app's callback handler reads
+    this event back and materializes the durable HandoffCard from it (see
+    `src/app/api/internal/agent-callback/route.ts`). Deliberately fired even
+    when nothing was applied — "no changes were required" is itself something
+    the next person should be told explicitly, not left to infer from silence.
+    """
+    tests_run: dict[str, Any] = {
+        "passed": bool(final_state.get("tests_passed", False)),
+    }
+    exit_code = final_state.get("tests_exit_code")
+    if exit_code is not None:
+        tests_run["exitCode"] = exit_code
+
+    recorder.event(
+        "HANDOFF_PREPARED",
+        {
+            "summary": final_state.get("summary_text") or "",
+            "testsRun": tests_run,
+            "openQuestions": [],
+        },
+    )
 
 
 def _notify(notifier: Any, *, status: str) -> None:
