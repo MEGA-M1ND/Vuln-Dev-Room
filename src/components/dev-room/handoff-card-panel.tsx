@@ -4,7 +4,6 @@ import * as React from "react";
 import { useEventListener } from "@liveblocks/react";
 
 import { useBoard } from "@/components/dev-room/board-context";
-import { can } from "@/lib/permissions";
 import { apiFetch, ApiClientError } from "@/lib/client/api";
 import type { HandoffCard } from "@/contracts/agent-events";
 import type { RunDTO } from "@/lib/agent/types";
@@ -14,54 +13,39 @@ import { cn } from "@/lib/utils";
 
 /**
  * Typed handoff — "here is what I did and what is unresolved," replacing an
- * informal message. Rendered next to the run's timeline (same pattern as
- * `RunDelivery` and `RunForkLineage`: a small structured panel about the run,
- * not a second timeline).
+ * informal message.
  *
- * For a run from the built-in runtime or an external adapter, the card is
- * created automatically once the run succeeds. A card that cited a
- * blast-radius result and scored at or above the room's threshold arrives
- * NEEDS_APPROVAL; the Approve button here is a visibility convenience for the
- * common case (room reviewers/owners) — the full eligibility rule, including a
- * git-derived owner of the affected paths, is enforced server-side in
- * `approveHandoffCard`, so a path-owner who is a plain engineer can still
- * approve by calling the API even though this button does not show for them.
+ * `HandoffCardView` is the presentational core (status, summary, tests, risk
+ * score, the Approve/Acknowledge action) shared by two hosts:
+ *  - `HandoffCardPanel`, rendered next to a run's timeline (same pattern as
+ *    `RunDelivery`/`RunForkLineage`: a small structured panel about the run,
+ *    not a second timeline) for the automatic, run-emitted card.
+ *  - `TaskHandoffs` (`task-handoffs.tsx`), a task-scoped list that also covers
+ *    manually-created cards, which have no run to attach to.
+ *
+ * A card that cited a blast-radius result and scored at or above the room's
+ * threshold arrives NEEDS_APPROVAL; the Approve button here is a visibility
+ * convenience for the common case (room reviewers/owners) — the full
+ * eligibility rule, including a git-derived owner of the affected paths, is
+ * enforced server-side in `approveHandoffCard`, so a path-owner who is a plain
+ * engineer can still approve by calling the API even though this button does
+ * not show for them.
  */
-export function HandoffCardPanel({ run }: { run: RunDTO }) {
+export function HandoffCardView({
+  card,
+  onChanged,
+}: {
+  card: HandoffCard;
+  onChanged: (card: HandoffCard) => void;
+}) {
   const { role, currentUserId } = useBoard();
-  const canAct = can(role, "run:handoff");
   const canApprove = role === "OWNER" || role === "REVIEWER";
 
-  const [card, setCard] = React.useState<HandoffCard | null>(null);
-  const [loaded, setLoaded] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const load = React.useCallback(async () => {
-    try {
-      const data = await apiFetch<{ cards: HandoffCard[] }>(
-        `/api/handoffs?roomId=${encodeURIComponent(run.roomId)}&runId=${encodeURIComponent(run.id)}`,
-      );
-      setCard(data.cards[0] ?? null);
-    } catch {
-      // A failed background refresh should not clobber a card already shown.
-    } finally {
-      setLoaded(true);
-    }
-  }, [run.roomId, run.id]);
-
-  React.useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEventListener(({ event }) => {
-    if (event.type === "HANDOFF_CARD_UPDATED" && event.taskId === run.taskId) {
-      void load();
-    }
-  });
-
   async function acknowledge() {
-    if (!card || pending) return;
+    if (pending) return;
     setPending(true);
     setError(null);
     try {
@@ -69,7 +53,7 @@ export function HandoffCardPanel({ run }: { run: RunDTO }) {
         `/api/handoffs/${card.id}/acknowledge`,
         { method: "POST" },
       );
-      setCard(data.card);
+      onChanged(data.card);
     } catch (err) {
       setError(
         err instanceof ApiClientError
@@ -82,7 +66,7 @@ export function HandoffCardPanel({ run }: { run: RunDTO }) {
   }
 
   async function approve() {
-    if (!card || pending) return;
+    if (pending) return;
     setPending(true);
     setError(null);
     try {
@@ -90,7 +74,7 @@ export function HandoffCardPanel({ run }: { run: RunDTO }) {
         `/api/handoffs/${card.id}/approve`,
         { method: "POST", body: JSON.stringify({}) },
       );
-      setCard(data.card);
+      onChanged(data.card);
     } catch (err) {
       setError(
         err instanceof ApiClientError
@@ -102,12 +86,10 @@ export function HandoffCardPanel({ run }: { run: RunDTO }) {
     }
   }
 
-  if (!loaded || !card) return null;
-
   const isRecipient = card.toUserId === currentUserId;
   const canAcknowledge =
     (card.status === "PENDING" || card.status === "APPROVED") &&
-    canAct &&
+    role !== "VIEWER" &&
     (isRecipient || role === "OWNER");
 
   return (
@@ -209,6 +191,39 @@ export function HandoffCardPanel({ run }: { run: RunDTO }) {
       )}
     </section>
   );
+}
+
+/** Run-scoped host: the one automatically-emitted card for a successful run. */
+export function HandoffCardPanel({ run }: { run: RunDTO }) {
+  const [card, setCard] = React.useState<HandoffCard | null>(null);
+  const [loaded, setLoaded] = React.useState(false);
+
+  const load = React.useCallback(async () => {
+    try {
+      const data = await apiFetch<{ cards: HandoffCard[] }>(
+        `/api/handoffs?roomId=${encodeURIComponent(run.roomId)}&runId=${encodeURIComponent(run.id)}`,
+      );
+      setCard(data.cards[0] ?? null);
+    } catch {
+      // A failed background refresh should not clobber a card already shown.
+    } finally {
+      setLoaded(true);
+    }
+  }, [run.roomId, run.id]);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEventListener(({ event }) => {
+    if (event.type === "HANDOFF_CARD_UPDATED" && event.taskId === run.taskId) {
+      void load();
+    }
+  });
+
+  if (!loaded || !card) return null;
+
+  return <HandoffCardView card={card} onChanged={setCard} />;
 }
 
 function riskTone(score: number): string {

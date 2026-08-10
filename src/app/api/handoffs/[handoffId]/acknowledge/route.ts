@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { ApiError, handleRouteError } from "@/lib/api/errors";
-import { requireRoomPermission } from "@/lib/auth/guards";
+import { requireRoomMembership } from "@/lib/auth/guards";
 import { requireUser } from "@/lib/auth/session";
 import { acknowledgeHandoffCard } from "@/lib/handoffs/service";
 import { broadcastRoomEvent } from "@/lib/liveblocks/server";
@@ -14,6 +14,12 @@ import { prisma } from "@/lib/db/client";
  * making it explicit rather than a message someone might not have read.
  * `acknowledgeHandoffCard` enforces who may press it (the named recipient, or
  * an OWNER standing in for them) — this route only resolves the room and role.
+ *
+ * Deliberately membership-only, not `requireRoomPermission(..., "run:handoff")`:
+ * that action is scoped to OWNER/ENGINEER (who may *initiate* a handoff), and a
+ * REVIEWER — the role this whole feature routes approvals to — does not hold
+ * it. Acknowledging is the receiving action, not authoring one; gating it on an
+ * authoring permission would 403 the exact person the card was addressed to.
  */
 export async function POST(
   req: NextRequest,
@@ -29,7 +35,7 @@ export async function POST(
     });
     if (!existing) throw new ApiError("NOT_FOUND", "Handoff card not found.");
 
-    const ctx = await requireRoomPermission(existing.roomId, "run:handoff");
+    const ctx = await requireRoomMembership(existing.roomId);
 
     const card = await acknowledgeHandoffCard({
       cardId: handoffId,
