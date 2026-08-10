@@ -18,6 +18,8 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.api.schemas import (
+    BlastRadiusRequestBody,
+    BlastRadiusResponseBody,
     CreateRunRequest,
     CreateRunResponse,
     ForkRunRequest,
@@ -27,6 +29,10 @@ from app.api.schemas import (
     ResumeRunResponse,
     ReviewRunRequest,
     RunStateResponse,
+)
+from app.blastradius.service import (
+    BlastRadiusRequest,
+    compute_blast_radius,
 )
 from app.config import RepositoryConfig, Settings, get_settings
 from app.graph.backend_agent import (
@@ -40,6 +46,7 @@ from app.graph.backend_agent import (
 from app.notifier import Notifier
 from app.persistence import repositories as repositories_db
 from app.persistence import runs as runs_db
+from app.models.configured_model import build_model
 from app.repository.clone import RepositorySourceError, github_https_url
 from app.sandbox.docker_sandbox import ensure_docker_available
 from app.sandbox.base import SandboxUnavailableError
@@ -406,3 +413,47 @@ def _intersect_allowed(app_allowed: list[str], repo_allowed: list[str]) -> list[
     repo_set = set(repo_allowed)
     intersected = [g for g in app_allowed if g in repo_set]
     return intersected or list(repo_allowed)
+
+
+@router.post(
+    "/internal/blast-radius",
+    response_model=BlastRadiusResponseBody,
+    dependencies=[Depends(require_service_token)],
+)
+def blast_radius(request: BlastRadiusRequestBody) -> BlastRadiusResponseBody:
+    """Answer "what would touching X affect?" for a room's repository.
+
+    Synchronous, unlike run creation: the caller is a person waiting for an
+    answer in a planning conversation, and a background task they would have to
+    poll for would make the feature useless at the moment it is needed.
+
+    Read-only. It clones and parses, never executes repository code, so it needs
+    no sandbox — the isolation that agent execution requires exists because the
+    agent *runs* what it finds, and this does not.
+    """
+    settings = get_settings()
+
+    try:
+        result = compute_blast_radius(
+            BlastRadiusRequest(
+                room_id=request.roomId,
+                owner=request.owner,
+                repo=request.repo,
+                revision=request.revision or "HEAD",
+                description=request.description,
+                target_path=request.targetPath,
+                target_symbol=request.targetSymbol,
+                critical_paths=request.criticalPaths,
+                audience=request.audience or "ENGINEER",
+            ),
+            model=build_model(settings),
+            clone_timeout=settings.clone_timeout,
+        )
+    except RepositorySourceError as exc:
+        # An unreachable repository is a problem with the room's configuration,
+        # not a runtime fault; 400 tells the caller to fix the connection.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    return BlastRadiusResponseBody(**result.as_dict())

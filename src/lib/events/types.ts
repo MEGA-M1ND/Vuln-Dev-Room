@@ -18,6 +18,10 @@ export type RoomBroadcastEvent =
       roomId: string;
       runId: string;
       status: string | null;
-    };
+    }
+  // Blast radius: a new impact map was computed for this room. Carries only the
+  // id — clients refetch the stored result so everyone sees the same answer
+  // rather than each rendering its own copy of a payload.
+  | { type: "BLAST_RADIUS_UPDATED"; roomId: string; queryId: string };
 
 export type RoomBroadcastEventType = RoomBroadcastEvent["type"];

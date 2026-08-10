@@ -257,3 +257,58 @@ export async function startReviewAgentRun(
     );
   }
 }
+
+/**
+ * Ask the runtime to compute a blast radius.
+ *
+ * Unlike the control signals above this returns a body, and a failure is fatal
+ * to the request rather than something the runtime converges on later: the
+ * caller is a person waiting for an answer, so a silent 404 would leave them
+ * staring at an empty panel with no explanation.
+ */
+export async function requestBlastRadius(
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  if (!isAgentRuntimeConfigured) {
+    throw new ApiError(
+      "INTEGRATION_NOT_CONFIGURED",
+      "The analysis service is not configured on this server.",
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${env.DEVROOM_AGENT_SERVICE_URL}/internal/blast-radius`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Token": env.DEVROOM_AGENT_SERVICE_TOKEN,
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+  } catch (err) {
+    console.error("[agent] runtime unreachable (blast-radius):", err);
+    throw new ApiError(
+      "INTERNAL_ERROR",
+      "Could not reach the analysis service.",
+    );
+  }
+
+  if (res.status === 400) {
+    // The runtime reports an unusable repository as 400; that is a problem
+    // with the room's configuration, so say so rather than blaming the server.
+    throw new ApiError(
+      "INTEGRATION_NOT_CONFIGURED",
+      "The connected repository could not be analysed. Check the repository connection.",
+    );
+  }
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    console.error("[agent] runtime rejected blast-radius:", res.status, detail);
+    throw new ApiError("INTERNAL_ERROR", "The analysis service failed.");
+  }
+
+  return res.json();
+}

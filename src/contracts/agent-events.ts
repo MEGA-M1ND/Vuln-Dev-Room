@@ -158,3 +158,26 @@ export type AgentEventResponse = {
   duplicates: number;
   results: AgentEventResult[];
 };
+
+/**
+ * Blast-radius query shapes.
+ *
+ * Re-exported so callers have one import site for "the room's typed contracts",
+ * while the definitions live in their own module. They are deliberately absent
+ * from `AGENT_EVENT_TYPES` above: that enum is what external adapters may
+ * publish, and a blast-radius query is asked by a human before any agent or run
+ * exists. See `@/contracts/blast-radius` for the full reasoning.
+ */
+export {
+  SUMMARY_AUDIENCES,
+  blastRadiusQuerySchema,
+  runtimeBlastRadiusResponseSchema,
+} from "@/contracts/blast-radius";
+export type {
+  AffectedFile,
+  BlastRadiusOwner,
+  BlastRadiusQuery,
+  BlastRadiusResult,
+  RuntimeBlastRadiusResponse,
+  SummaryAudience,
+} from "@/contracts/blast-radius";
