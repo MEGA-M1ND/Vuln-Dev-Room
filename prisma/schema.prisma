@@ -269,6 +269,10 @@ model User {
   handoffsTo           HandoffCard[]            @relation("HandoffTo")
   handoffsAcknowledged HandoffCard[]            @relation("HandoffAcknowledgedBy")
   handoffApprovals     HandoffApproval[]        @relation("HandoffApprovalReviewer")
+  // Phase 1: multi-agent coordination.
+  agentSessions        AgentSession[]           @relation("AgentSessionCreatedBy")
+  agentSessionMembers  AgentSessionMember[]     @relation("AgentSessionMemberUser")
+  agentCredentials     AgentCredential[]        @relation("AgentCredentialUser")
 
   @@index([email])
 }
@@ -301,6 +305,10 @@ model Room {
   policyDecisions         PolicyDecision[]
   blastRadiusQueryResults BlastRadiusQueryResult[]
   handoffCards            HandoffCard[]
+  // Phase 1: multi-agent coordination. The Room is the tenant boundary for
+  // every one of these — see docs/agent-coordination-phase1-plan.md §2.2.
+  agentSessions           AgentSession[]
+  agentCredentials        AgentCredential[]
 
   @@index([createdById])
 }
@@ -603,9 +611,10 @@ model RepositoryConnection {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  room       Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  connection GitHubConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
-  playbooks  Playbook[]
+  room          Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  connection    GitHubConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  playbooks     Playbook[]
+  agentSessions AgentSession[]
 
   @@unique([roomId, owner, repo])
   @@index([roomId, isActive])
@@ -986,4 +995,353 @@ model BlastRadiusQueryResult {
 
   @@index([roomId, createdAt])
   @@index([requestedById])
+}
+
+// ===========================================================================
+// Phase 1: governed shared memory + work coordination for multiple agents
+//
+// Several security/security-adjacent agents work one repository at the same
+// time. Without a coordination layer they duplicate each other's work, trip
+// over the same files, and report findings nobody can weigh. This models the
+// three things they must agree on — who is in the session, who holds which
+// piece of work, and what has been claimed to be true — with PostgreSQL as the
+// arbiter, never application-level co-operation.
+//
+// Primary keys here are uuid() rather than the cuid() used by the older models
+// (see docs/agent-coordination-phase1-plan.md §2.1). Both are String to
+// Prisma, so foreign keys across the boundary are unaffected.
+// ===========================================================================
+
+enum AgentSessionStatus {
+  ACTIVE
+  CLOSED
+}
+
+/// A work unit's lifecycle. Constrained on purpose: a free-text status is a
+/// status nobody can query on, and "claimed" has to mean exactly one thing for
+/// the lease invariant to be checkable.
+enum WorkUnitStatus {
+  AVAILABLE
+  CLAIMED
+  COMPLETED
+  ABANDONED
+}
+
+/// A discovery is a CLAIM, not a fact. It arrives UNVERIFIED and only a human
+/// (or a later verification phase) moves it. Nothing in Phase 1 auto-verifies:
+/// an agent that could mark its own finding VERIFIED would make the whole
+/// distinction decorative.
+enum DiscoveryStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+}
+
+enum AgentSessionEventType {
+  SESSION_CREATED
+  MEMBER_JOINED
+  WORK_UNITS_PUBLISHED
+  WORK_UNIT_CLAIMED
+  WORK_UNIT_HEARTBEAT
+  WORK_UNIT_RELEASED
+  WORK_UNIT_COMPLETED
+  WORK_UNIT_LEASE_EXPIRED
+  DISCOVERY_PUBLISHED
+}
+
+/// A bounded collaboration between several agents on one room's repository.
+///
+/// Owns the event sequence every participant paginates against: `lastSequence`
+/// is the allocator, incremented by a locking UPDATE inside the same
+/// transaction as the event insert, which is what makes the sequence
+/// gap-free rather than merely unique.
+model AgentSession {
+  id                     String             @id @default(uuid())
+  roomId                 String
+  createdById            String
+  repositoryConnectionId String?
+  /// The commit every participant reasons against. Pinned so two agents cannot
+  /// silently be looking at different trees.
+  baseCommitSha          String?
+  title                  String
+  description            String
+  /// What the session must achieve, and what it must not do. Plain strings:
+  /// these are read by agents, not evaluated by the server.
+  requirements           String[]           @default([])
+  constraints            String[]           @default([])
+  status                 AgentSessionStatus @default(ACTIVE)
+  /// Sequence allocator. Never decremented, never reused.
+  lastSequence           Int                @default(0)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  room        Room                  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdBy   User                  @relation("AgentSessionCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  repository  RepositoryConnection? @relation(fields: [repositoryConnectionId], references: [id], onDelete: SetNull)
+  members     AgentSessionMember[]
+  workUnits   WorkUnit[]
+  discoveries Discovery[]
+  events      AgentSessionEvent[]
+
+  @@index([roomId, status, createdAt])
+  @@index([createdById])
+  @@index([repositoryConnectionId])
+}
+
+/// A participant. `userId` is NOT nullable: every agent identity is bound to
+/// the human or service principal that issued its credential, so a finding or
+/// a claim always traces back to someone accountable.
+model AgentSessionMember {
+  id             String   @id @default(uuid())
+  agentSessionId String
+  roomId         String
+  userId         String
+  /// Display identity of the agent process ("scanner-1", "remediator").
+  agentLabel     String
+  /// "claude_code", "codex", "human", …
+  harnessType    String
+  /// Best-effort; harnesses do not always report it.
+  model          String?
+  lastSeenAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  session     AgentSession        @relation(fields: [agentSessionId], references: [id], onDelete: Cascade)
+  user        User                @relation("AgentSessionMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  leases      WorkUnitLease[]     @relation("LeaseClaimedBy")
+  discoveries Discovery[]         @relation("DiscoveryAuthor")
+  events      AgentSessionEvent[] @relation("SessionEventActor")
+
+  /// One membership per agent label per session — re-joining is an update, so
+  /// a restarted agent process resumes its identity instead of forking it.
+  @@unique([agentSessionId, agentLabel])
+  @@index([agentSessionId])
+  @@index([userId])
+  @@index([roomId])
+}
+
+/// A claimable piece of work.
+///
+/// `key` is caller-supplied and stable per session, which is what makes
+/// `publish_work_units` naturally idempotent: republishing the same plan
+/// updates rather than duplicates, with or without an idempotency key.
+model WorkUnit {
+  id             String         @id @default(uuid())
+  roomId         String
+  agentSessionId String
+  key            String
+  title          String
+  description    String?
+  status         WorkUnitStatus @default(AVAILABLE)
+  /// Higher runs first in `list_work_units`. Advisory only.
+  priority       Int            @default(0)
+  /// Files this unit is expected to touch. Advisory: used to warn about
+  /// overlap, never to enforce it — Phase 1 does not intercept writes.
+  filePaths      String[]       @default([])
+  /// Denormalized pointer to the live lease. The authority is still the
+  /// partial unique index on WorkUnitLease; this exists so the common read
+  /// does not need a second query.
+  activeLeaseId  String?        @unique
+  completedAt    DateTime?
+  /// Free-text outcome recorded at completion.
+  resultSummary  String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  session     AgentSession    @relation(fields: [agentSessionId], references: [id], onDelete: Cascade)
+  leases      WorkUnitLease[] @relation("LeasesForWorkUnit")
+  activeLease WorkUnitLease?  @relation("ActiveLease", fields: [activeLeaseId], references: [id], onDelete: SetNull)
+
+  @@unique([agentSessionId, key])
+  @@index([agentSessionId, status, priority])
+  @@index([roomId])
+}
+
+/// A time-bounded claim on a work unit. Append-only history: releasing sets
+/// `releasedAt` rather than deleting, so "who held this and when" survives.
+///
+/// A LEASE, not a lock: an agent that crashes holding one blocks the unit only
+/// until `expiresAt`, after which another agent reclaims it. A permanent lock
+/// would need an operator to clear it by hand every time a process died.
+model WorkUnitLease {
+  id              String    @id @default(uuid())
+  roomId          String
+  workUnitId      String
+  claimedById     String
+  claimedAt       DateTime  @default(now())
+  expiresAt       DateTime
+  lastHeartbeatAt DateTime  @default(now())
+  releasedAt      DateTime?
+  /// "released" | "completed" | "expired" — why the lease ended.
+  releaseReason   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workUnit  WorkUnit           @relation("LeasesForWorkUnit", fields: [workUnitId], references: [id], onDelete: Cascade)
+  claimedBy AgentSessionMember @relation("LeaseClaimedBy", fields: [claimedById], references: [id], onDelete: Cascade)
+  activeFor WorkUnit?          @relation("ActiveLease")
+
+  // NOTE: "at most one UNRELEASED lease per work unit" is a PARTIAL unique
+  // index, which Prisma's schema language cannot express. It is created by
+  // hand in the migration:
+  //   CREATE UNIQUE INDEX "WorkUnitLease_active_per_unit"
+  //     ON "WorkUnitLease" ("workUnitId") WHERE "releasedAt" IS NULL;
+  // Do not remove it: it is the invariant, not an optimization.
+  @@index([workUnitId, releasedAt])
+  @@index([claimedById])
+  @@index([roomId])
+}
+
+/// An UNTRUSTED claim published by an agent.
+///
+/// Deliberately not called a "finding": it is what one agent says it saw,
+/// carrying who said it, with what harness and model, and how sure it was.
+/// Consumers are handed `status` so they can weigh it; `get_worker_context`
+/// labels unverified ones explicitly rather than blending them with verified
+/// ones.
+model Discovery {
+  id                   String          @id @default(uuid())
+  roomId               String
+  agentSessionId       String
+  authorMemberId       String
+  /// Copied from the member at publish time so the provenance of an old
+  /// discovery survives the member later being edited or removed.
+  harnessType          String
+  model                String?
+  /// "vulnerability" | "false_positive" | "context" | "blocker" | "note"
+  type                 String
+  title                String
+  /// Size-bounded and secret-scanned before it ever reaches this column.
+  content              String
+  /// 0.0–1.0, self-reported by the author. A self-report, not a measurement.
+  confidence           Float
+  status               DiscoveryStatus @default(UNVERIFIED)
+  /// Work unit keys this bears on, so a claiming agent can find what is
+  /// relevant to it without reading every discovery in the session.
+  affectedWorkUnitKeys String[]        @default([])
+  baseCommitSha        String?
+  /// True when the redactor replaced likely-secret spans in `content`.
+  redacted             Boolean         @default(false)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  session  AgentSession        @relation(fields: [agentSessionId], references: [id], onDelete: Cascade)
+  author   AgentSessionMember  @relation("DiscoveryAuthor", fields: [authorMemberId], references: [id], onDelete: Cascade)
+  evidence DiscoveryEvidence[]
+
+  @@index([agentSessionId, status, createdAt])
+  @@index([authorMemberId])
+  @@index([roomId])
+}
+
+/// A structured pointer backing a discovery.
+///
+/// Pointers plus a short excerpt only — never whole files. The repository is
+/// the source of truth for its own contents; copying it into Postgres would
+/// duplicate it, stale it, and quietly turn the audit database into a place
+/// secrets get stored.
+model DiscoveryEvidence {
+  id          String   @id @default(uuid())
+  discoveryId String
+  /// "file" | "commit" | "url" | "command_output"
+  kind        String
+  path        String?
+  line        Int?
+  commitSha   String?
+  url         String?
+  /// Bounded and secret-scanned, same as Discovery.content.
+  excerpt     String?
+  createdAt   DateTime @default(now())
+
+  discovery Discovery @relation(fields: [discoveryId], references: [id], onDelete: Cascade)
+
+  @@index([discoveryId])
+}
+
+/// Append-only session log with a per-session monotonic sequence.
+///
+/// This is the spec's `room_events`, renamed for the sequencing scope it
+/// actually has (see the plan doc §2.3): `RunEvent` is sequenced per run and
+/// named for it, and this is sequenced per session. `roomId` is carried so a
+/// tenant filter never needs a join.
+///
+/// Sequence allocation is `UPDATE AgentSession SET lastSequence = lastSequence + 1
+/// RETURNING`, in the same transaction as the insert here — the row lock
+/// serializes concurrent appenders, so the sequence has no gaps and
+/// `get_context_delta` can page it without losing or repeating an event.
+model AgentSessionEvent {
+  id             String                @id @default(uuid())
+  agentSessionId String
+  roomId         String
+  sequence       Int
+  type           AgentSessionEventType
+  /// Null for events the server originated rather than a member.
+  actorMemberId  String?
+  /// The work unit / discovery / member this event is about.
+  entityId       String?
+  payloadJson    Json?
+  createdAt      DateTime              @default(now())
+
+  session AgentSession        @relation(fields: [agentSessionId], references: [id], onDelete: Cascade)
+  actor   AgentSessionMember? @relation("SessionEventActor", fields: [actorMemberId], references: [id], onDelete: SetNull)
+
+  @@unique([agentSessionId, sequence])
+  @@index([agentSessionId, sequence])
+  @@index([roomId])
+}
+
+/// A bearer credential a native MCP client presents.
+///
+/// Exists because the app's human authentication is a NextAuth session cookie,
+/// which a native MCP client cannot hold, and the only existing non-browser
+/// authentication is a single global shared secret with no principal behind it
+/// (DEVROOM_INGEST_TOKEN). Neither satisfies "agent identities must be linked
+/// to a human/service principal".
+///
+/// The secret itself is NEVER stored — only its SHA-256. `tokenPrefix` is the
+/// first few characters, kept solely so a human can tell two credentials apart
+/// in a list and so audit lines can name one without naming the secret.
+model AgentCredential {
+  id          String    @id @default(uuid())
+  roomId      String
+  /// The principal this credential acts as. Everything the bearer does is
+  /// authorized as this user's room membership — the credential grants no
+  /// capability its issuer does not already hold.
+  userId      String
+  name        String
+  tokenHash   String    @unique
+  tokenPrefix String
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation("AgentCredentialUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([userId])
+}
+
+/// Replay cache for mutating MCP tools.
+///
+/// Written in the SAME transaction as the effect it records, so a stored
+/// response always corresponds to a committed effect — never a response
+/// remembered for work that rolled back. A replay collides on the unique
+/// constraint and returns the stored response verbatim.
+model IdempotencyRecord {
+  id              String   @id @default(uuid())
+  roomId          String
+  /// Scoped to the principal as well as the room: two agents that happen to
+  /// generate the same key must not read each other's results.
+  principalUserId String
+  agentSessionId  String?
+  toolName        String
+  idempotencyKey  String
+  responseJson    Json
+  createdAt       DateTime @default(now())
+
+  @@unique([roomId, principalUserId, toolName, idempotencyKey])
+  @@index([roomId, createdAt])
 }

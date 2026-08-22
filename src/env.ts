@@ -73,6 +73,15 @@ const serverSchema = z.object({
   // ingestion is simply not configured, and the endpoint says so.
   DEVROOM_INGEST_TOKEN: z.string().trim().optional().default(""),
 
+  // --- Phase 1: multi-agent coordination over MCP ---
+  // The remote MCP endpoint is OFF by default. It is a write-capable surface
+  // reachable by long-lived bearer credentials, so a deployment opts into it
+  // deliberately rather than inheriting it from a default.
+  DEVROOM_MCP_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true"),
+
   // --- MVP Phase 6: demo affordances (never on in production) ---
   DEVROOM_DEMO_MODE: z
     .string()
@@ -190,3 +199,9 @@ export const isAgentIngestConfigured = env.DEVROOM_INGEST_TOKEN.length > 0;
 /** Demo-only affordances (e.g. sample task seeding). Never in production. */
 export const isDemoMode =
   env.NODE_ENV !== "production" && env.DEVROOM_DEMO_MODE === true;
+
+/**
+ * Whether the remote MCP coordination endpoint (`POST /api/mcp`) accepts
+ * requests. Off by default — see the note on DEVROOM_MCP_ENABLED above.
+ */
+export const isMcpEnabled = env.DEVROOM_MCP_ENABLED === true;

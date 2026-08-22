@@ -50,7 +50,20 @@ export type RoomAction =
   // Read a run's evidence report and download the JSON bundle.
   | "evidence:read"
   // Drive the mock executor (demo mode).
-  | "run:simulate";
+  | "run:simulate"
+  // --- Phase 1: multi-agent coordination (MCP) ------------------------------
+  // Read a coordination session: its context, work units, discoveries, delta.
+  | "agent-session:read"
+  // Open a new coordination session in the room.
+  | "agent-session:create"
+  // Join a session as a named agent, and act as one.
+  | "agent-session:join"
+  // Publish the work breakdown a session's agents claim from.
+  | "work-unit:publish"
+  // Claim / heartbeat / release / complete a unit of work.
+  | "work-unit:claim"
+  // Publish a discovery — an untrusted claim other agents will read.
+  | "discovery:publish";
 
 const OWNER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "room:read",
@@ -80,6 +93,12 @@ const OWNER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "policy:manage",
   "evidence:read",
   "run:simulate",
+  "agent-session:read",
+  "agent-session:create",
+  "agent-session:join",
+  "work-unit:publish",
+  "work-unit:claim",
+  "discovery:publish",
 ]);
 
 const ENGINEER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
@@ -106,6 +125,14 @@ const ENGINEER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "policy:read",
   "evidence:read",
   "run:simulate",
+  // Engineers drive coordinated agent work: they open sessions, break work
+  // down, and run the agents that claim it.
+  "agent-session:read",
+  "agent-session:create",
+  "agent-session:join",
+  "work-unit:publish",
+  "work-unit:claim",
+  "discovery:publish",
 ]);
 
 /**
@@ -126,6 +153,10 @@ const REVIEWER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "approval:decide",
   "policy:read",
   "evidence:read",
+  // Observes coordinated agent work; never claims or authors any of it. Same
+  // separation of duty as the rest of this role — an approver who also does
+  // the work is not a control.
+  "agent-session:read",
 ]);
 
 // Stage 1 decision: VIEWERs MAY add comments (documented in README). They can
@@ -141,6 +172,7 @@ const VIEWER_ACTIONS: ReadonlySet<RoomAction> = new Set<RoomAction>([
   "playbook:read",
   "policy:read",
   "evidence:read",
+  "agent-session:read",
 ]);
 
 const ROLE_ACTIONS: Record<MembershipRole, ReadonlySet<RoomAction>> = {

@@ -605,8 +605,72 @@ doc's open decisions.
 
 ---
 
+## Multi-agent coordination (MCP)
+
+Several security/coding agents can work one repository at the same time without
+duplicating each other or overwriting each other's assumptions. A remote **MCP
+Streamable HTTP** endpoint at `POST /api/mcp` exposes 12 tools over a
+coordination layer whose source of truth is PostgreSQL.
+
+Three things get a single authoritative answer:
+
+| Question | Answered by |
+| --- | --- |
+| Who is in this session? | `AgentSession`, `AgentSessionMember` |
+| Who holds which piece of work *right now*? | `WorkUnit`, `WorkUnitLease` |
+| What has been claimed, by whom, on what evidence? | `Discovery`, `DiscoveryEvidence` |
+
+**A claim is a lease, not a lock.** Concurrent claimants are arbitrated by a
+partial unique index (`ON "WorkUnitLease" ("workUnitId") WHERE "releasedAt" IS
+NULL`) — a database constraint, not application logic — so exactly one agent
+wins and the rest are told `already_claimed`. An agent that dies holding a
+lease blocks its unit only until the lease lapses; a lock would need an
+operator to clear it by hand every time a process died.
+
+**Discoveries are claims, not facts.** They land `UNVERIFIED` and nothing on
+the publish path can set anything else. `get_worker_context` returns verified
+and unverified claims in *separate fields* rather than one list with a flag, so
+a reader that ignores an unexpected field sees fewer claims rather than
+unverified ones promoted to fact. Content is secret-scanned: a publish that
+looks like it carries a credential is refused outright rather than stored
+redacted, because a stored redaction hides an incident.
+
+**The session log is gap-free.** Sequence allocation is a locking
+`UPDATE … SET "lastSequence" = "lastSequence" + 1 … RETURNING` in the same
+transaction as the event insert, so `get_context_delta` can page an exclusive
+cursor with no holes and no repeats — a hole would be indistinguishable, to a
+polling client, from an event the client missed.
+
+**Authentication is per-agent and principal-bound.** Native MCP clients cannot
+hold a browser session cookie, and the pre-existing non-browser auth is a
+global shared secret with no principal behind it. `AgentCredential` is a
+room-scoped bearer token issued *by a room member*, stored only as SHA-256 and
+revocable; capability is then decided by the existing `can(role, action)`
+matrix, so a credential grants nothing its issuing user does not already hold.
+No tool schema accepts a room, organization, or user id — enforced by a test.
+
+```bash
+npx tsx scripts/issue-agent-credential.ts <room-slug> <user-email> <name> --days 30
+```
+
+Off by default; set `DEVROOM_MCP_ENABLED="true"` to enable.
+
+**This coordinates memory and work claims. It does not intercept filesystem
+writes** — an agent that ignores the layer and edits an unclaimed file is not
+stopped by anything here. Hard enforcement needs isolated worktrees, change
+proposals and artifact-bound approval, and is explicitly later work.
+
+---
+
 ## Related documentation
 
+- [`docs/agent-coordination-phase1.md`](docs/agent-coordination-phase1.md) —
+  multi-agent coordination architecture and threat model
+- [`docs/agent-coordination-phase1-plan.md`](docs/agent-coordination-phase1-plan.md)
+  — the implementation plan, including where the specification conflicted with
+  this architecture and how each conflict was resolved
+- [`docs/mcp-client-config.md`](docs/mcp-client-config.md) — Claude Code and
+  Codex configuration, plus a worked multi-agent flow
 - [`docs/blast-radius-pivot-plan.md`](docs/blast-radius-pivot-plan.md) — the
   migration plan and design rationale for the three features above
 - [`docs/agent-dev-room-foundations.md`](docs/agent-dev-room-foundations.md) —

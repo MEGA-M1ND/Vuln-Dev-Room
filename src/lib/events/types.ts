@@ -25,6 +25,19 @@ export type RoomBroadcastEvent =
   | { type: "BLAST_RADIUS_UPDATED"; roomId: string; queryId: string }
   // A handoff card was created or acknowledged. Payload-free for the same
   // reason as the others — clients refetch the card list for the task/run.
-  | { type: "HANDOFF_CARD_UPDATED"; roomId: string; taskId: string };
+  | { type: "HANDOFF_CARD_UPDATED"; roomId: string; taskId: string }
+  // Phase 1 multi-agent coordination: something changed in an agent session.
+  //
+  // Carries ONLY the four fields needed to decide whether to refetch — type,
+  // session, the entity touched, and the sequence now current. The durable
+  // record is read back with `get_context_delta` using `sequence` as the
+  // cursor; this signal is not the event, it is a nudge to go and read it.
+  | {
+      type: "AGENT_SESSION_EVENT";
+      roomId: string;
+      agentSessionId: string;
+      entityId: string | null;
+      sequence: number;
+    };
 
 export type RoomBroadcastEventType = RoomBroadcastEvent["type"];
