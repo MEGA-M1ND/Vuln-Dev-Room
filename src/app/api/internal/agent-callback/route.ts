@@ -8,7 +8,12 @@ import { broadcastRoomEvent } from "@/lib/liveblocks/server";
 import { handleRouteError } from "@/lib/api/errors";
 import { prisma } from "@/lib/db/client";
 import { createHandoffCardFromRun } from "@/lib/handoffs/service";
+import {
+  recordExecutedValidation,
+  recordSelfReportedValidation,
+} from "@/lib/attestation/receipts";
 import type { HandoffTestsRun } from "@/contracts/handoffs";
+import type { ValidationProvenance } from "@prisma/client";
 
 /**
  * Internal callback the Python agent-runtime calls whenever a run's status or
@@ -40,6 +45,19 @@ function tokenValid(provided: string | null): boolean {
  * Read back the HANDOFF_PREPARED event the runtime just wrote and turn it into
  * a durable HandoffCard. `createHandoffCardFromRun` is idempotent on `runId`,
  * so a retried callback delivery is a safe no-op.
+ *
+ * PHASE 0 — VALIDATION PROVENANCE. This path is different from the external
+ * adapter path in `ingest.ts`, and the difference is real rather than a matter
+ * of trust in the caller: our own runtime executes the suite inside a sandbox
+ * we start, and records the command, exit code and container id as a
+ * TEST_RESULT artifact. When those are present we can honestly write an
+ * EXECUTED_BY_PLATFORM receipt, because the platform genuinely observed the
+ * execution.
+ *
+ * When they are NOT present — no TEST_RESULT artifact, or no sandbox id — the
+ * claim degrades to SELF_REPORTED_BY_AGENT. It is not upgraded on the strength
+ * of the caller holding the service token: authenticating the reporter says
+ * nothing about whether anything ran.
  */
 async function materializeHandoffFromRunEvent(
   runId: string,
@@ -47,7 +65,7 @@ async function materializeHandoffFromRunEvent(
 ): Promise<void> {
   const run = await prisma.agentRun.findUnique({
     where: { id: runId },
-    select: { taskId: true, agentId: true },
+    select: { taskId: true, agentId: true, sandboxId: true },
   });
   if (!run) return;
 
@@ -62,6 +80,55 @@ async function materializeHandoffFromRunEvent(
     openQuestions?: string[];
   };
 
+  // The runtime's own record of what it ran, written by `run_tests` in
+  // services/agent-runtime/app/graph/backend_agent.py.
+  const testArtifact = await prisma.runArtifact.findFirst({
+    where: { runId, type: "TEST_RESULT" },
+    orderBy: { sequence: "desc" },
+    select: { contentText: true, metadataJson: true, createdAt: true },
+  });
+  const meta = (testArtifact?.metadataJson ?? null) as {
+    command?: string;
+    exitCode?: number;
+    passed?: boolean;
+    timedOut?: boolean;
+  } | null;
+
+  let provenance: ValidationProvenance = "SELF_REPORTED_BY_AGENT";
+  let receiptId: string | null = null;
+
+  const canAttest =
+    Boolean(run.sandboxId) &&
+    Boolean(meta) &&
+    typeof meta?.exitCode === "number" &&
+    Boolean(meta?.command);
+
+  if (canAttest && testArtifact) {
+    const receipt = await recordExecutedValidation({
+      runId,
+      command: meta!.command!,
+      environmentId: run.sandboxId!,
+      // The artifact's creation time is the closest observation of completion
+      // available here; the runtime does not currently emit start/finish
+      // timestamps for the suite. Both are recorded as the same instant rather
+      // than invented, and closing that gap is noted in
+      // docs/validation-provenance.md.
+      startedAt: testArtifact.createdAt,
+      completedAt: testArtifact.createdAt,
+      exitCode: meta!.exitCode!,
+      stdout: testArtifact.contentText,
+    });
+    receiptId = receipt.id;
+    provenance = "EXECUTED_BY_PLATFORM";
+  } else if (payload.testsRun) {
+    const receipt = await recordSelfReportedValidation({
+      runId,
+      command: payload.testsRun.command ?? `${run.agentId} reported test run`,
+      exitCode: payload.testsRun.exitCode ?? null,
+    });
+    receiptId = receipt.id;
+  }
+
   await createHandoffCardFromRun({
     runId,
     roomId,
@@ -70,6 +137,9 @@ async function materializeHandoffFromRunEvent(
     diffSummary: payload.summary ?? "",
     testsRun: payload.testsRun,
     openQuestions: payload.openQuestions,
+    testsRunProvenance: provenance,
+    // Linked only when the platform actually executed it.
+    testsRunReceiptId: provenance === "EXECUTED_BY_PLATFORM" ? receiptId : null,
   });
 }
 

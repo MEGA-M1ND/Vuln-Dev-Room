@@ -236,6 +236,16 @@ enum ApprovalRequestStatus {
   REJECTED
   /// The run ended (cancelled/failed) before a reviewer answered.
   CANCELLED
+  // --- Phase 0 trust-invariant hardening. Appended, never reordered.
+  /// The approval was granted, but the binding no longer matches the live
+  /// state: an artifact, the base revision, the planned actions, or the policy
+  /// set moved after the reviewer looked. The approval is dead and a new one
+  /// must be requested against the new binding. `stalenessReason` says which
+  /// field diverged.
+  STALE
+  /// The approval's `expiresAt` passed before it was consumed. Distinct from
+  /// STALE: nothing changed, the reviewer's decision simply aged out.
+  EXPIRED
 }
 
 enum ApprovalDecisionKind {
@@ -462,25 +472,26 @@ model AgentRun {
   // sharing the parent's, so this invariant never has to be relaxed for it.
   activeTaskId String? @unique
 
-  room             Room                  @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  task             AgentTask             @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  requestedBy      User                  @relation("RunRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
-  owner            User?                 @relation("RunOwnedBy", fields: [ownerUserId], references: [id], onDelete: SetNull)
-  playbook         Playbook?             @relation("PlaybookRuns", fields: [playbookId], references: [id], onDelete: SetNull)
-  parent           AgentRun?             @relation("RunForks", fields: [parentRunId], references: [id], onDelete: SetNull)
-  forks            AgentRun[]            @relation("RunForks")
-  reviewedRun      AgentRun?             @relation("RunReviews", fields: [reviewedRunId], references: [id], onDelete: SetNull)
-  reviews          AgentRun[]            @relation("RunReviews")
-  artifacts        RunArtifact[]
-  events           RunEvent[]
-  interventions    RunIntervention[]
-  pullRequest      PullRequestLink?
-  riskDismissals   RiskSignalDismissal[]
-  savedPlaybook    Playbook?             @relation("PlaybookSourceRun")
-  policyProfile    PolicyProfile?        @relation(fields: [policyProfileId], references: [id], onDelete: SetNull)
-  policyDecisions  PolicyDecision[]
-  approvalRequests ApprovalRequest[]
-  evidenceReport   EvidenceReport?
+  room               Room                  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  task               AgentTask             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  requestedBy        User                  @relation("RunRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
+  owner              User?                 @relation("RunOwnedBy", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  playbook           Playbook?             @relation("PlaybookRuns", fields: [playbookId], references: [id], onDelete: SetNull)
+  parent             AgentRun?             @relation("RunForks", fields: [parentRunId], references: [id], onDelete: SetNull)
+  forks              AgentRun[]            @relation("RunForks")
+  reviewedRun        AgentRun?             @relation("RunReviews", fields: [reviewedRunId], references: [id], onDelete: SetNull)
+  reviews            AgentRun[]            @relation("RunReviews")
+  artifacts          RunArtifact[]
+  events             RunEvent[]
+  interventions      RunIntervention[]
+  pullRequest        PullRequestLink?
+  riskDismissals     RiskSignalDismissal[]
+  savedPlaybook      Playbook?             @relation("PlaybookSourceRun")
+  policyProfile      PolicyProfile?        @relation(fields: [policyProfileId], references: [id], onDelete: SetNull)
+  policyDecisions    PolicyDecision[]
+  approvalRequests   ApprovalRequest[]
+  evidenceReport     EvidenceReport?
+  validationReceipts ValidationReceipt[]
 
   @@index([taskId, createdAt])
   @@index([roomId])
@@ -519,6 +530,16 @@ model RunIntervention {
 }
 
 /// Append-only durable output of a run (plan, diff, test result, summary, log).
+/// An artifact produced by a run: a plan, a diff, a test result, a log.
+///
+/// TREATED AS IMMUTABLE. Nothing in the application updates or deletes one
+/// after creation, and approval bindings depend on that: a binding names the
+/// exact artifacts a reviewer saw. Immutability is NOT enforced by a database
+/// trigger — see docs/approval-binding.md "Why no UPDATE trigger" — because a
+/// trigger would cover only UPDATE while an INSERT of a new artifact or a
+/// DELETE changes the manifest just as much. The real control is that
+/// `verifyApprovalBinding` recomputes the manifest from live content at
+/// execution time, which catches all three uniformly.
 model RunArtifact {
   id           String          @id @default(cuid())
   runId        String
@@ -527,10 +548,20 @@ model RunArtifact {
   contentText  String?
   contentJson  Json?
   metadataJson Json?
+  /// SHA-256 over the canonical encoding of this artifact's content, recorded
+  /// at write time. A DENORMALIZATION for display and cross-checking only —
+  /// binding verification never trusts it, because an attacker who edits
+  /// content can edit this column too. Null for rows written before this
+  /// column existed; those are never back-filled, since the original bytes
+  /// cannot be re-derived from a row that may since have changed.
+  contentHash  String?
   sequence     Int
   createdAt    DateTime        @default(now())
 
   run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  validationStdout ValidationReceipt[] @relation("ValidationStdout")
+  validationStderr ValidationReceipt[] @relation("ValidationStderr")
 
   // Monotonic, unique sequence per run — also prevents accidental duplicates.
   @@unique([runId, sequence])
@@ -813,6 +844,43 @@ model ApprovalRequest {
   createdAt     DateTime              @default(now())
   resolvedAt    DateTime?
 
+  // --- Phase 0: artifact-bound approval -----------------------------------
+  //
+  // The prose `summary` above is what a reviewer READS. These fields are what
+  // the reviewer's decision is BOUND TO. The distinction is the whole point:
+  // a summary cannot detect that the diff changed after it was approved.
+  //
+  /// SHA-256 over `canonicalize(bindingJson)`. Recomputed from live state
+  /// immediately before execution; any divergence refuses execution and moves
+  /// this request to STALE. Null on requests created before this feature —
+  /// those are LEGACY_UNBOUND and can never execute (see docs/approval-binding.md).
+  bindingDigest         String?
+  /// The exact canonical payload the digest was taken over, stored so a
+  /// reviewer can be shown precisely what they bound and so a mismatch can be
+  /// reported field-by-field rather than as an opaque hash difference.
+  bindingJson           Json?
+  /// Digest of the ordered, active policy set at request time. Denormalized
+  /// out of `bindingJson` so "which approvals were bound to the ruleset I am
+  /// about to edit?" is an indexed query rather than a JSON scan.
+  policyDigest          String?
+  /// Hard deadline. An approval that is not consumed by this instant moves to
+  /// EXPIRED and cannot execute, however unchanged the binding is.
+  expiresAt             DateTime?
+  /// When this request was moved to STALE or EXPIRED.
+  invalidatedAt         DateTime?
+  /// Machine-readable cause, e.g. "ARTIFACT_CONTENT_CHANGED",
+  /// "BASE_REVISION_CHANGED", "POLICY_CHANGED", "EXPIRED", "LEGACY_UNBOUND".
+  stalenessReason       String?
+  /// Set when an executor successfully verified and claimed this approval.
+  /// Single-use: the conditional UPDATE that sets it is what stops two
+  /// executors acting on one approval, and what closes the TOCTOU window
+  /// between verification and execution.
+  consumedAt            DateTime?
+  /// The digest that actually verified at consumption time. Recorded so the
+  /// evidence report can state which binding executed, not merely which was
+  /// approved.
+  consumedBindingDigest String?
+
   run         AgentRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
   requestedBy User?              @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
   decisions   ApprovalDecision[]
@@ -824,6 +892,12 @@ model ApprovalRequest {
 
   @@index([runId, createdAt])
   @@index([status, createdAt])
+  // Execution-time lookup: "is there a usable approval for this run+action?"
+  @@index([runId, action, status])
+  // Sweeping expired approvals, and answering "what is about to age out?".
+  @@index([expiresAt])
+  // "Which approvals are bound to the policy set I am editing?"
+  @@index([policyDigest])
 }
 
 /// A reviewer's answer. Append-only and never updated in place: a changed mind
@@ -909,11 +983,23 @@ model HandoffCard {
 
   /// What changed, in prose. Populated from the run's own DIFF artifact when a
   /// handoff is emitted automatically.
-  diffSummary   String
-  /// Structured test results as the agent actually recorded them.
-  testsRunJson  Json?
+  diffSummary        String
+  /// Structured test results AS CLAIMED. Read `testsRunProvenance` before
+  /// treating this as evidence — on its own it is an assertion, not an
+  /// observation.
+  testsRunJson       Json?
+  /// How the `testsRunJson` claim was obtained. Defaults to
+  /// SELF_REPORTED_BY_AGENT so a row written before this column existed — and
+  /// any future writer that forgets to set it — is treated as an assertion
+  /// rather than silently promoted to evidence. Missing provenance is
+  /// untrusted provenance.
+  testsRunProvenance ValidationProvenance @default(SELF_REPORTED_BY_AGENT)
+  /// The platform-executed receipt backing `testsRunJson`, when one exists.
+  /// Null for self-reported claims — which is what makes the difference
+  /// queryable rather than a matter of reading a label.
+  testsRunReceiptId  String?
   /// Blockers the receiver needs answered before picking this up.
-  openQuestions String[] @default([])
+  openQuestions      String[]             @default([])
 
   /// The impact map this handoff was reviewed against, if one was computed.
   /// Points at a STORED result on purpose: a recomputed one would silently
@@ -1344,4 +1430,81 @@ model IdempotencyRecord {
 
   @@unique([roomId, principalUserId, toolName, idempotencyKey])
   @@index([roomId, createdAt])
+}
+
+// ===========================================================================
+// Phase 0 trust-invariant hardening — validation provenance
+//
+// Two very different statements were previously stored in the same shape:
+//
+//   "I ran the suite in an isolated container and it exited 0"   (evidence)
+//   "tests passed"                                               (an assertion)
+//
+// Collapsing them is the defect. `ValidationProvenance` forces every
+// validation claim to say which one it is, and `satisfiesValidationGate()` in
+// src/lib/attestation/ accepts only the first.
+// ===========================================================================
+
+/// Where a validation claim came from, and therefore how much it is worth.
+enum ValidationProvenance {
+  /// The platform executed it in a workspace it controls and holds a receipt:
+  /// command, environment identity, timestamps, exit code, bounded output.
+  /// The ONLY provenance that can satisfy a validation gate.
+  EXECUTED_BY_PLATFORM
+  /// An agent (or a human) told us the outcome. This is an assertion about
+  /// the world, not an observation of it. Never satisfies a gate — the agent
+  /// asserting it is the same party the gate exists to check.
+  SELF_REPORTED_BY_AGENT
+  /// A third party attests to the result (a CI provider, a signed in-toto
+  /// statement). Signature/issuer verification is NOT implemented in this
+  /// phase, so this is treated as INFORMATIONAL and also never satisfies a
+  /// gate — see docs/validation-provenance.md. Present so external results
+  /// can be recorded honestly now rather than mislabelled as either of the
+  /// other two.
+  EXTERNALLY_ATTESTED
+}
+
+/// The receipt for one validation attempt.
+///
+/// Append-only. A receipt is the *observation*; `passed` is not stored as an
+/// independent field on purpose — it is derived from `exitCode == 0`, so there
+/// is no way to record "passed: true, exitCode: 1".
+model ValidationReceipt {
+  id                  String               @id @default(uuid())
+  runId               String
+  provenance          ValidationProvenance
+  /// What was actually run. For SELF_REPORTED this is whatever was claimed.
+  command             String
+  /// Identity of the isolated environment: sandbox/container id, or the
+  /// external system's job id. Null for SELF_REPORTED, which by definition
+  /// has no environment we observed.
+  environmentId       String?
+  startedAt           DateTime
+  completedAt         DateTime?
+  /// Null when the claim carries no exit code — which is itself a reason it
+  /// cannot satisfy a gate.
+  exitCode            Int?
+  /// Bounded REFERENCES to output, never the output itself: a full test log is
+  /// unbounded, attacker-influenced text, and inlining it here would put it in
+  /// every query that reads a receipt. Points at a RunArtifact.
+  stdoutArtifactId    String?
+  stderrArtifactId    String?
+  /// Bytes referenced, so a reader knows whether the reference was truncated.
+  outputByteCount     Int?
+  /// The artifact manifest digest this validation was performed against.
+  /// A receipt for digest X cannot validate artifact set Y — this is what
+  /// stops an old green run being replayed as evidence for a modified patch.
+  boundArtifactDigest String?
+  /// Raw attestation envelope for EXTERNALLY_ATTESTED. Stored unverified and
+  /// labelled as such; nothing reads it as authority in this phase.
+  attestationJson     Json?
+  createdAt           DateTime             @default(now())
+
+  run    AgentRun     @relation(fields: [runId], references: [id], onDelete: Cascade)
+  stdout RunArtifact? @relation("ValidationStdout", fields: [stdoutArtifactId], references: [id], onDelete: SetNull)
+  stderr RunArtifact? @relation("ValidationStderr", fields: [stderrArtifactId], references: [id], onDelete: SetNull)
+
+  // "Is there a passing platform-executed receipt for this run?" — the gate query.
+  @@index([runId, provenance, createdAt])
+  @@index([boundArtifactDigest])
 }

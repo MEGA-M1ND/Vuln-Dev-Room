@@ -664,6 +664,13 @@ proposals and artifact-bound approval, and is explicitly later work.
 
 ## Related documentation
 
+- [`docs/approval-binding.md`](docs/approval-binding.md) — how an approval is
+  bound to the exact artifacts, base state, planned actions and policy set that
+  were reviewed; the STALE/EXPIRED lifecycle; and the artifact-mutation and
+  TOCTOU threat model
+- [`docs/validation-provenance.md`](docs/validation-provenance.md) — why an
+  agent reporting "tests passed" is not execution evidence, and what a
+  platform-executed receipt has to carry before it can satisfy a gate
 - [`docs/agent-coordination-phase1.md`](docs/agent-coordination-phase1.md) —
   multi-agent coordination architecture and threat model
 - [`docs/agent-coordination-phase1-plan.md`](docs/agent-coordination-phase1-plan.md)

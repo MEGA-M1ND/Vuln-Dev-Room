@@ -4,6 +4,8 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db/client";
 import { ApiError } from "@/lib/api/errors";
+import { verifyAndConsumeApproval } from "@/lib/approvals/consume";
+import { approvalRefusalMessage } from "@/lib/approvals/policy";
 import { isGitHubConfigured } from "@/env";
 import {
   assertSafeBranch,
@@ -24,6 +26,10 @@ import type { PullRequestDTO } from "@/lib/agent/types";
  *
  * Safety properties, by construction:
  *  - only a SUCCEEDED run may ship;
+ *  - a binding approval must verify and be claimed first: the artifact
+ *    manifest, base state, planned actions and policy digest are re-checked
+ *    against exactly what the reviewer approved, and the approval is spent
+ *    single-use (see src/lib/approvals/consume.ts);
  *  - the PR is always a DRAFT, never auto-merged;
  *  - work lands on a fresh `devroom/<task-slug>-<short-run-id>` branch cut
  *    from the configured base branch — never a direct commit to the default
@@ -118,6 +124,24 @@ export async function createDraftPrForRun(params: {
       "BAD_REQUEST",
       "Only a successful run can be shipped as a pull request.",
       { status: run.status },
+    );
+  }
+
+  // BINDING GATE. This is the path that pushes real code to a real remote, and
+  // before Phase 0 it checked only `run.status === "SUCCEEDED"` — an approval
+  // was never consulted here at all, so a diff could be approved, changed, and
+  // then shipped. `verifyAndConsumeApproval` re-verifies the artifact manifest,
+  // base state, planned actions and policy digest against what the reviewer
+  // bound, and claims the approval single-use.
+  const approval = await verifyAndConsumeApproval({
+    runId: run.id,
+    action: "CREATE_PULL_REQUEST",
+  });
+  if (!approval.ok) {
+    throw new ApiError(
+      approval.reason === "NO_APPROVAL" ? "BAD_REQUEST" : "APPROVAL_NOT_BINDING",
+      approvalRefusalMessage(approval.reason),
+      { reason: approval.reason, detail: approval.detail },
     );
   }
 

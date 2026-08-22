@@ -4,6 +4,7 @@ import * as React from "react";
 import { useEventListener } from "@liveblocks/react";
 
 import { useBoard } from "@/components/dev-room/board-context";
+import { ValidationProvenanceBadge } from "@/components/dev-room/validation-provenance-badge";
 import { apiFetch, ApiClientError } from "@/lib/client/api";
 import type { HandoffCard } from "@/contracts/agent-events";
 import type { RunDTO } from "@/lib/agent/types";
@@ -105,15 +106,25 @@ export function HandoffCardView({
       <p className="mt-2 text-sm text-slate-200">{card.diffSummary}</p>
 
       {card.testsRun ? (
-        <p className="mt-2 text-xs text-slate-400">
-          Tests:{" "}
-          <span className={card.testsRun.passed ? "text-green-400" : "text-red-400"}>
-            {card.testsRun.passed ? "passed" : "did not pass"}
-          </span>
-          {typeof card.testsRun.exitCode === "number"
-            ? ` (exit ${card.testsRun.exitCode})`
-            : null}
-        </p>
+        <div className="mt-2">
+          <p className="text-xs text-slate-400">
+            Tests:{" "}
+            <span className={card.testsRun.passed ? "text-green-400" : "text-red-400"}>
+              {card.testsRun.passed ? "passed" : "did not pass"}
+            </span>
+            {typeof card.testsRun.exitCode === "number"
+              ? ` (exit ${card.testsRun.exitCode})`
+              : null}
+          </p>
+          {/*
+            The provenance badge is not decoration. Before Phase 0 an agent
+            asserting "tests passed" rendered identically to a suite the
+            platform actually executed, so a reviewer had no way to tell an
+            observation from a claim. Unverified provenance is styled as a
+            warning rather than a neutral tag for the same reason.
+          */}
+          <ValidationProvenanceBadge provenance={card.testsRunProvenance} />
+        </div>
       ) : null}
 
       {card.openQuestions.length > 0 ? (

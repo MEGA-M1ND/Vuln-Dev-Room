@@ -4,6 +4,8 @@ import type { ApprovalDecisionKind } from "@prisma/client";
 
 import { ApiError } from "@/lib/api/errors";
 import { appendRunEvent } from "@/lib/audit";
+import { verifyApprovalBinding } from "@/lib/approvals/binding";
+import { approvalRefusalMessage } from "@/lib/approvals/policy";
 import { prisma } from "@/lib/db/client";
 
 /**
@@ -28,6 +30,14 @@ export type ResolveApprovalInput = {
  * reason the gate exists: a reviewer who is also the requester turns the
  * approval into a formality, and the evidence report would then attest to a
  * review that never happened.
+ *
+ * PHASE 0: approving also re-verifies the request's binding, so a reviewer
+ * cannot grant an approval whose artifacts, base state or policy set already
+ * moved while they were reading. Re-approval after drift is a NEW request with
+ * a NEW binding and its own ApprovalDecision row — a drifted request is
+ * terminal (STALE), never revived, so the audit trail shows both the abandoned
+ * decision and the fresh one rather than one decision that quietly changed
+ * meaning.
  */
 export async function resolveApproval(input: ResolveApprovalInput) {
   const request = await prisma.approvalRequest.findUnique({
@@ -52,6 +62,59 @@ export async function resolveApproval(input: ResolveApprovalInput) {
   }
 
   const approved = input.decision === "APPROVE";
+
+  // Verify the binding at DECISION time as well as at execution time.
+  //
+  // Execution-time verification is the control that cannot be bypassed, but
+  // checking here too means a reviewer is never allowed to grant an approval
+  // that is already dead — otherwise they would press Approve, see success,
+  // and only discover at execution that the diff had moved while they were
+  // reading it. Rejecting a drifted request is always allowed: refusing
+  // something that changed is still a valid thing to want to do.
+  if (approved) {
+    const verification = await verifyApprovalBinding(prisma, {
+      bindingDigest: request.bindingDigest,
+      bindingJson: request.bindingJson,
+    });
+    if (!verification.ok) {
+      await prisma.approvalRequest.update({
+        where: { id: request.id },
+        data: {
+          status: "STALE",
+          invalidatedAt: new Date(),
+          stalenessReason: verification.reason,
+          activeRunId: null,
+        },
+      });
+      throw new ApiError(
+        "APPROVAL_NOT_BINDING",
+        approvalRefusalMessage(verification.reason),
+        { reason: verification.reason, detail: verification.detail },
+      );
+    }
+  }
+
+  // Expiry is checked for approvals only. A reviewer may still reject an
+  // expired request to record their objection.
+  if (
+    approved &&
+    request.expiresAt &&
+    request.expiresAt.getTime() <= Date.now()
+  ) {
+    await prisma.approvalRequest.update({
+      where: { id: request.id },
+      data: {
+        status: "EXPIRED",
+        invalidatedAt: new Date(),
+        stalenessReason: "EXPIRED",
+        activeRunId: null,
+      },
+    });
+    throw new ApiError("APPROVAL_NOT_BINDING", approvalRefusalMessage("EXPIRED"), {
+      reason: "EXPIRED",
+      detail: `Approval expired at ${request.expiresAt.toISOString()}.`,
+    });
+  }
 
   // One transaction: the decision, the request's resolution, and the run's new
   // status move together. A partial write here would leave a run parked on a
@@ -98,6 +161,12 @@ export async function resolveApproval(input: ResolveApprovalInput) {
       action: request.action,
       summary: request.summary,
       comment: input.comment?.trim() || null,
+      // The reviewer's decision is bound to THIS digest. Recorded on the
+      // hash-chained event so the evidence report can show what was approved
+      // independently of the mutable ApprovalRequest row.
+      bindingDigest: request.bindingDigest,
+      policyDigest: request.policyDigest,
+      expiresAt: request.expiresAt?.toISOString() ?? null,
     },
   });
 

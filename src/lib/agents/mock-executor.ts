@@ -9,6 +9,13 @@ import type {
 } from "@prisma/client";
 
 import { appendRunEvent } from "@/lib/audit";
+import {
+  buildApprovalBinding,
+  computeArtifactContentHash,
+  type PlannedAction,
+} from "@/lib/approvals/binding";
+import { APPROVAL_TTL_MS } from "@/lib/approvals/policy";
+import { verifyAndConsumeApproval } from "@/lib/approvals/consume";
 import { prisma } from "@/lib/db/client";
 import { finalizeEvidenceReport } from "@/lib/evidence/service";
 import { enforceAction } from "@/lib/policy-engine";
@@ -113,15 +120,21 @@ async function writeArtifact(runId: string, step: ScriptStep): Promise<void> {
     select: { sequence: true },
   });
 
+  const contentText = step.artifact.contentText ?? null;
+  const contentJson = (step.artifact.contentJson ?? null) as Prisma.JsonValue | null;
+
   await prisma.runArtifact.create({
     data: {
       runId,
       type: step.artifact.type,
       title: step.artifact.title,
-      contentText: step.artifact.contentText ?? null,
+      contentText,
       contentJson: (step.artifact.contentJson ?? undefined) as
         | Prisma.InputJsonValue
         | undefined,
+      // Denormalized for display and cross-checking. Binding verification
+      // recomputes from live content and never trusts this column.
+      contentHash: computeArtifactContentHash({ contentText, contentJson }),
       sequence: (last?.sequence ?? 0) + 1,
     },
   });
@@ -163,6 +176,29 @@ async function openApprovalGate(
   });
   if (existing) return existing;
 
+  // Bind the request to what the reviewer will actually see. `summary` above
+  // is prose for a human; THIS is what the decision is checked against before
+  // anything executes. Built at request time so the digest names the state as
+  // it stood when the gate opened.
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + APPROVAL_TTL_MS);
+  const plannedActions: PlannedAction[] = [
+    {
+      action: step.action as GovernedAction,
+      command: step.command ?? null,
+      path: step.path ?? null,
+      branch: step.branch ?? run.workingBranch ?? null,
+      args: null,
+    },
+  ];
+  const binding = await buildApprovalBinding(prisma, {
+    runId: run.id,
+    action: step.action as GovernedAction,
+    plannedActions,
+    createdAt,
+    expiresAt,
+  });
+
   return prisma.approvalRequest.create({
     data: {
       runId: run.id,
@@ -172,6 +208,11 @@ async function openApprovalGate(
       policyId,
       requestedById: run.requestedById,
       activeRunId: run.id,
+      createdAt,
+      expiresAt,
+      bindingDigest: binding.digest,
+      bindingJson: binding.payload as unknown as Prisma.InputJsonValue,
+      policyDigest: binding.payload.policyDigest,
       detailsJson: {
         reason,
         repository: run.targetRepositoryKey,
@@ -292,29 +333,30 @@ export async function advanceRun(runId: string): Promise<AdvanceResult> {
       //
       // Scoped to (run, action) so approving a pull request does not silently
       // grant an unrelated gated action later in the same run.
-      const granted = await prisma.approvalRequest.findFirst({
-        where: { runId, action: step.action as GovernedAction, status: "APPROVED" },
-        orderBy: { resolvedAt: "desc" },
-        include: {
-          decisions: {
-            where: { decision: "APPROVE" },
-            orderBy: { createdAt: "desc" },
-            take: 1,
-          },
-        },
+      // Verify the binding and CLAIM the approval in one transaction. This is
+      // the control: a reviewer approved a specific set of artifacts against a
+      // specific base state under a specific ruleset, and if any of that moved
+      // the approval is dead. Previously this was a bare lookup by
+      // (run, action, APPROVED) that executed whatever the workspace happened
+      // to contain by the time the executor got here.
+      const granted = await verifyAndConsumeApproval({
+        runId,
+        action: step.action as GovernedAction,
       });
 
-      if (granted) {
+      if (granted.ok) {
         await appendRunEvent({
           runId,
           type: "POLICY_EVALUATED",
           actorType: "system",
           payload: eventPayload(step, {
             outcome: "ALLOWED",
-            reason: `Permitted by approval ${granted.id}.`,
+            reason: `Permitted by approval ${granted.approvalRequestId}.`,
             policy: evaluation.decidedBy?.policyName ?? null,
-            approvalRequestId: granted.id,
-            approvedBy: granted.decisions[0]?.reviewerId ?? null,
+            approvalRequestId: granted.approvalRequestId,
+            approvedBy: granted.approvedByUserId,
+            // Which binding actually executed — not merely which was approved.
+            bindingDigest: granted.digest,
           }),
         });
         await writeArtifact(runId, step);
@@ -323,13 +365,39 @@ export async function advanceRun(runId: string): Promise<AdvanceResult> {
           type: step.event,
           actorType: "agent",
           actorId: run.agentId,
-          payload: eventPayload(step, { approvalRequestId: granted.id }),
+          payload: eventPayload(step, {
+            approvalRequestId: granted.approvalRequestId,
+            bindingDigest: granted.digest,
+          }),
         });
         if (step.event === "PR_DRAFTED") {
           await createSimulatedPullRequest(run, step);
         }
         const more = steps.some((s) => s.index > step.index);
         return { status: "advanced", stepIndex: step.index, done: !more };
+      }
+
+      // An approval existed but no longer binds. Halt rather than fall through
+      // to "open a fresh gate": the reviewer must be told their approval was
+      // invalidated and why, and re-opening silently would let an agent churn
+      // artifacts until a gate happened to land on a state it liked.
+      if (granted.reason !== "NO_APPROVAL") {
+        await setStatus(runId, "FAILED", {
+          errorCode: `APPROVAL_${granted.reason}`,
+          errorSummary: granted.detail,
+        });
+        await appendRunEvent({
+          runId,
+          type: "RUN_FAILED",
+          actorType: "system",
+          payload: eventPayload(step, {
+            outcome: "REFUSED",
+            reason: granted.reason,
+            detail: granted.detail,
+            approvalRequestId: granted.approvalRequestId,
+          }),
+        });
+        return { status: "halted", reason: granted.detail };
       }
 
       if (!step.gated) {

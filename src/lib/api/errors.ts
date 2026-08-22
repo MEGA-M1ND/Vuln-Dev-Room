@@ -25,6 +25,12 @@ export type ApiErrorCode =
   | "RUN_NOT_REVIEWABLE"
   // A required optional integration (e.g. GitHub) is not configured.
   | "INTEGRATION_NOT_CONFIGURED"
+  // Phase 0: an approval exists but no longer binds to the live state — an
+  // artifact, the base revision, the planned actions or the policy set moved
+  // after the reviewer looked, or the approval expired or was already used.
+  // 409, not 403: the caller is not forbidden, the world changed underneath a
+  // decision that was valid when it was made.
+  | "APPROVAL_NOT_BINDING"
   | "INTERNAL_ERROR";
 
 const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
@@ -39,6 +45,7 @@ const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   RUN_NOT_FORKABLE: 409,
   RUN_NOT_REVIEWABLE: 409,
   INTEGRATION_NOT_CONFIGURED: 400,
+  APPROVAL_NOT_BINDING: 409,
   INTERNAL_ERROR: 500,
 };
 

@@ -9,6 +9,7 @@ import { env } from "@/env";
 import { ApiError } from "@/lib/api/errors";
 import { ACTIVE_RUN_STATUSES, isTerminal } from "@/lib/agent/interventions";
 import { createHandoffCardFromRun } from "@/lib/handoffs/service";
+import { recordSelfReportedValidation } from "@/lib/attestation/receipts";
 import {
   CONTRACT_VERSION,
   type AgentEvent,
@@ -252,7 +253,28 @@ async function ingestOne(event: AgentEvent): Promise<AgentEventResult> {
       // the built-in runtime reports one from `_finalize()`: build the durable
       // HandoffCard from what was actually recorded, not from a self-report
       // that skipped ingestion's own validation.
+      //
+      // PHASE 0: the `testsRun` field arriving here is an ASSERTION. This
+      // endpoint is reachable by any adapter holding the ingest token; the
+      // platform observed no command, no container and no exit code. It is
+      // therefore recorded as SELF_REPORTED_BY_AGENT, which
+      // `satisfiesValidationGate` can never accept — and a matching
+      // ValidationReceipt is written so the claim is visible in the run's
+      // validation history as a claim rather than vanishing into a card field.
       if (event.eventType === "handoff_prepared") {
+        const claimed = event.payload?.testsRun;
+        let receiptId: string | null = null;
+
+        if (claimed) {
+          const receipt = await recordSelfReportedValidation({
+            runId: run.id,
+            command: claimed.command ?? `${event.agent.provider} reported test run`,
+            exitCode: claimed.exitCode ?? null,
+            claimedAt: event.timestamp ? new Date(event.timestamp) : undefined,
+          });
+          receiptId = receipt.id;
+        }
+
         await createHandoffCardFromRun({
           runId: run.id,
           roomId: run.roomId,
@@ -261,7 +283,15 @@ async function ingestOne(event: AgentEvent): Promise<AgentEventResult> {
           diffSummary: event.payload?.summary ?? "",
           testsRun: event.payload?.testsRun,
           openQuestions: event.payload?.openQuestions,
+          // Explicit, never defaulted: an adapter's word is not evidence.
+          testsRunProvenance: "SELF_REPORTED_BY_AGENT",
+          // Deliberately NOT set — `testsRunReceiptId` means "a platform
+          // execution backs this". The self-reported receipt above is
+          // discoverable through the run's receipt list instead.
+          testsRunReceiptId: null,
         });
+
+        void receiptId;
       }
 
       return { eventId: created.id, runId: run.id, duplicate: false };

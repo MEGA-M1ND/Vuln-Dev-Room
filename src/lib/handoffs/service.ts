@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { MembershipRole, Prisma } from "@prisma/client";
+import type { MembershipRole, Prisma, ValidationProvenance } from "@prisma/client";
 
 import { ApiError } from "@/lib/api/errors";
 import { prisma } from "@/lib/db/client";
@@ -95,6 +95,8 @@ function toHandoffCard(row: {
   toActorLabel: string;
   diffSummary: string;
   testsRunJson: Prisma.JsonValue;
+  testsRunProvenance: ValidationProvenance;
+  testsRunReceiptId: string | null;
   openQuestions: string[];
   blastRadiusResultId: string | null;
   status: string;
@@ -117,6 +119,10 @@ function toHandoffCard(row: {
     toActorLabel: row.toActorLabel,
     diffSummary: row.diffSummary,
     testsRun: (row.testsRunJson as HandoffTestsRun | null) ?? null,
+    // Always emitted, so no client can render the claim without also having
+    // the reason not to trust it.
+    testsRunProvenance: row.testsRunProvenance,
+    testsRunReceiptId: row.testsRunReceiptId,
     openQuestions: row.openQuestions,
     blastRadiusResultId: row.blastRadiusResultId,
     status: row.status as HandoffCard["status"],
@@ -207,6 +213,10 @@ export async function createHandoffCard(params: {
       testsRunJson: input.testsRun
         ? (input.testsRun as unknown as Prisma.InputJsonValue)
         : undefined,
+      // A human typing "tests passed" into a form is a self-report, exactly
+      // like an agent asserting it. Stated rather than left to the column
+      // default so the intent is visible at the call site.
+      testsRunProvenance: "SELF_REPORTED_BY_AGENT",
       openQuestions: input.openQuestions,
       blastRadiusResultId: input.blastRadiusResultId ?? null,
       status: initialStatus,
@@ -235,6 +245,9 @@ export async function createHandoffCardFromRun(params: {
   fromActorLabel: string;
   diffSummary: string;
   testsRun?: HandoffTestsRun;
+  /** Defaults to SELF_REPORTED_BY_AGENT — missing provenance is untrusted. */
+  testsRunProvenance?: ValidationProvenance;
+  testsRunReceiptId?: string | null;
   openQuestions?: string[];
 }): Promise<HandoffCard> {
   const existing = await prisma.handoffCard.findUnique({
@@ -267,6 +280,13 @@ export async function createHandoffCardFromRun(params: {
         testsRunJson: params.testsRun
           ? (params.testsRun as unknown as Prisma.InputJsonValue)
           : undefined,
+        // Provenance is supplied by the caller. `ingestAgentEvents` passes
+        // SELF_REPORTED_BY_AGENT because an adapter's report is a claim; the
+        // built-in runtime callback may pass EXECUTED_BY_PLATFORM together
+        // with the receipt it actually produced. Defaulting here would make
+        // whichever caller forgot look trustworthy.
+        testsRunProvenance: params.testsRunProvenance ?? "SELF_REPORTED_BY_AGENT",
+        testsRunReceiptId: params.testsRunReceiptId ?? null,
         openQuestions: params.openQuestions ?? [],
         status: "PENDING",
       },

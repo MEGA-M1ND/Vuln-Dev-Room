@@ -26,6 +26,17 @@ export const HANDOFF_CARD_STATUSES = [
 export type HandoffCardStatusValue = (typeof HANDOFF_CARD_STATUSES)[number];
 
 /** Structured test outcome, as the agent actually recorded it. */
+/**
+ * A test-run CLAIM attached to a handoff.
+ *
+ * Note what this is not: evidence. Whoever fills it in is asserting an
+ * outcome, and nothing here was observed by the platform. `HandoffCard`
+ * records `testsRunProvenance` alongside it, defaulting to
+ * SELF_REPORTED_BY_AGENT, and the UI labels it as unverified. A validation
+ * GATE is satisfied only by a `ValidationReceipt` with
+ * EXECUTED_BY_PLATFORM provenance — never by this object.
+ * See docs/validation-provenance.md.
+ */
 export const handoffTestsRunSchema = z.object({
   passed: z.boolean(),
   command: z.string().max(500).optional(),
@@ -33,6 +44,17 @@ export const handoffTestsRunSchema = z.object({
 });
 
 export type HandoffTestsRun = z.infer<typeof handoffTestsRunSchema>;
+
+/**
+ * Mirrors the Prisma `ValidationProvenance` enum. Declared here rather than
+ * imported so client components can use it without pulling in `@prisma/client`.
+ */
+export const VALIDATION_PROVENANCES = [
+  "EXECUTED_BY_PLATFORM",
+  "SELF_REPORTED_BY_AGENT",
+  "EXTERNALLY_ATTESTED",
+] as const;
+export type ValidationProvenanceValue = (typeof VALIDATION_PROVENANCES)[number];
 
 /**
  * Create a handoff card manually — a human handing off work they did without
@@ -80,6 +102,13 @@ export type HandoffCard = {
   toActorLabel: string;
   diffSummary: string;
   testsRun: HandoffTestsRun | null;
+  /**
+   * How `testsRun` was obtained. Always present on the wire so a client cannot
+   * render the claim without also having the reason not to trust it.
+   */
+  testsRunProvenance: ValidationProvenanceValue;
+  /** Set only when a platform-executed receipt backs the claim. */
+  testsRunReceiptId: string | null;
   openQuestions: string[];
   blastRadiusResultId: string | null;
   status: HandoffCardStatusValue;
