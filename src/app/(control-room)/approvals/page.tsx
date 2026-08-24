@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function ApprovalsPage() {
   const { organization, user, allows } = await requireControlRoom();
   const pending = await listPendingApprovals(organization.id);
+  const supersededCount = pending.filter((p) => p.superseded).length;
 
   return (
     <>
@@ -20,6 +21,19 @@ export default async function ApprovalsPage() {
       />
 
       <div className="space-y-4 px-8 py-6">
+        {supersededCount > 0 && (
+          <p className="rounded-md border border-deny/40 bg-deny/[0.06] px-4 py-3 text-xs text-foreground/85">
+            <span className="font-semibold text-deny">
+              {supersededCount} of {pending.length} waiting{" "}
+              {supersededCount === 1 ? "approval has" : "approvals have"} been
+              superseded.
+            </span>{" "}
+            The work changed after the gate opened, so these can no longer be
+            approved — a new approval must be requested against the current
+            state.
+          </p>
+        )}
+
         {!allows("approval:decide") && pending.length > 0 && (
           <p className="rounded-md border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
             You can see what is waiting, but only an Admin or Reviewer can
@@ -60,6 +74,8 @@ export default async function ApprovalsPage() {
                       null
                     }
                     requestedAt={request.createdAt.toISOString()}
+                    binding={request.binding}
+                    superseded={request.superseded}
                     canDecide={allows("approval:decide") && !isRequester}
                     blockedReason={
                       isRequester

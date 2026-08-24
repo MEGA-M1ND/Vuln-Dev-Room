@@ -279,6 +279,10 @@ export default async function DashboardPage() {
             ) : (
               <BarBreakdown
                 data={data.topRepositories.map((row) => ({
+                  // Grouped by the full "owner/name" key but labelled with the
+                  // basename, so two different repositories sharing a name
+                  // render the same label. Key on the full value.
+                  id: row.repository,
                   label: row.repository.split("/").pop() ?? row.repository,
                   value: row.runs,
                   tone: "bg-tool",

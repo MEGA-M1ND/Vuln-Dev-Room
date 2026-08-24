@@ -5,6 +5,7 @@ import type { ApprovalDecisionKind } from "@prisma/client";
 import { ApiError } from "@/lib/api/errors";
 import { appendRunEvent } from "@/lib/audit";
 import { verifyApprovalBinding } from "@/lib/approvals/binding";
+import { supersededView, toApprovalBindingView } from "@/lib/approvals/view";
 import { approvalRefusalMessage } from "@/lib/approvals/policy";
 import { prisma } from "@/lib/db/client";
 
@@ -194,9 +195,16 @@ export async function resolveApproval(input: ResolveApprovalInput) {
   return { request, decision, approved };
 }
 
-/** Pending gates across a room, newest first — the reviewer's queue. */
+/**
+ * Pending gates across a room, newest first — the reviewer's queue.
+ *
+ * Each row carries its binding view and a LIVE staleness check, so the queue
+ * can show "this one drifted while you were away" before a reviewer opens it.
+ * The check is read-only (see `src/lib/approvals/view.ts`): listing approvals
+ * must never consume or invalidate one.
+ */
 export async function listPendingApprovals(roomId: string) {
-  return prisma.approvalRequest.findMany({
+  const rows = await prisma.approvalRequest.findMany({
     where: { status: "PENDING", run: { roomId } },
     orderBy: { createdAt: "desc" },
     include: {
@@ -216,6 +224,14 @@ export async function listPendingApprovals(roomId: string) {
       requestedBy: { select: { id: true, name: true, image: true } },
     },
   });
+
+  return Promise.all(
+    rows.map(async (row) => ({
+      ...row,
+      binding: toApprovalBindingView(row),
+      superseded: await supersededView(row),
+    })),
+  );
 }
 
 /** Full approval history for a run, for the evidence report. */

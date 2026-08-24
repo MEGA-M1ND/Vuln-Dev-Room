@@ -2,6 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ApprovalCard, type ApprovalDetails } from "@/components/agentguard/approval-card";
+import {
+  ApprovalBindingPanel,
+  SupersededBanner,
+} from "@/components/agentguard/approval-binding";
+import { ValidationPanel } from "@/components/agentguard/validation-panel";
 import { PageHeader } from "@/components/agentguard/page-header";
 import {
   Card,
@@ -20,6 +25,8 @@ import { RunControls } from "@/components/agentguard/run-controls";
 import { RunTimeline } from "@/components/agentguard/run-timeline";
 import { Button } from "@/components/ui/button";
 import { requireControlRoom } from "@/lib/dashboard/context";
+import { listRunApprovals } from "@/lib/approvals/view";
+import { validationView } from "@/lib/attestation/view";
 import { prisma } from "@/lib/db/client";
 import { cn } from "@/lib/utils";
 
@@ -47,7 +54,8 @@ export default async function RunDetailPage({ params }: Params) {
 
   if (!run) notFound();
 
-  const [events, decisions, approvals, activePolicies] = await Promise.all([
+  const [events, decisions, approvals, activePolicies, validation, boundApprovals] =
+    await Promise.all([
     prisma.runEvent.findMany({
       where: { runId },
       orderBy: { sequence: "asc" },
@@ -80,9 +88,31 @@ export default async function RunDetailPage({ params }: Params) {
       orderBy: { priority: "asc" },
       select: { id: true, name: true, effect: true, message: true },
     }),
+    validationView(runId),
+    // Carries each approval's binding plus a LIVE staleness check, so a gate
+    // that drifted while nobody was looking shows as superseded rather than
+    // looking approvable until someone presses the button.
+    listRunApprovals(runId),
   ]);
 
+
+
   const pending = approvals.find((a) => a.status === "PENDING");
+  const boundById = new Map(boundApprovals.map((a) => [a.id, a]));
+  const pendingBound = pending ? boundById.get(pending.id) : undefined;
+
+  // `advanceRun` sets errorCode to `APPROVAL_<REASON>` when a binding stops
+  // holding (see mock-executor). Recover the reason and the approval it killed.
+  const supersededFailure =
+    run.errorCode?.startsWith("APPROVAL_") &&
+    run.errorCode !== "APPROVAL_REJECTED"
+      ? {
+          reason: run.errorCode.replace(/^APPROVAL_/, ""),
+          approval: boundApprovals.find(
+            (a) => a.status === "STALE" || a.status === "EXPIRED",
+          ),
+        }
+      : null;
   const diff = [...run.artifacts].reverse().find((a) => a.type === "DIFF");
   const tests = [...run.artifacts].reverse().find((a) => a.type === "TEST_RESULT");
   const plan = run.artifacts.find((a) => a.type === "PLAN");
@@ -157,10 +187,36 @@ export default async function RunDetailPage({ params }: Params) {
               requestedAt={pending.createdAt.toISOString()}
               canDecide={canDecide}
               blockedReason={blockedReason}
+              binding={pendingBound?.binding}
+              superseded={pendingBound?.superseded ?? null}
             />
           )}
 
-          {run.errorSummary && !pending && (
+          {/* A run halted because its approval stopped binding is the headline
+              case for this whole feature, and the generic error box buried it.
+              Show the superseded banner and the binding that died, so the
+              reader can see WHICH artifact moved. */}
+          {run.errorSummary && !pending && supersededFailure && (
+            <div className="space-y-4">
+              <SupersededBanner
+                superseded={{
+                  reason: supersededFailure.reason,
+                  message: run.errorSummary,
+                  detail: null,
+                  invalidatedAt:
+                    supersededFailure.approval?.superseded?.invalidatedAt ?? null,
+                  detectedLive: false,
+                }}
+              />
+              {supersededFailure.approval && (
+                <ApprovalBindingPanel
+                  binding={supersededFailure.approval.binding}
+                />
+              )}
+            </div>
+          )}
+
+          {run.errorSummary && !pending && !supersededFailure && (
             <div className="rounded-lg border border-deny/40 bg-deny/[0.06] px-5 py-4">
               <p className="text-xs font-semibold text-deny">
                 {run.errorCode === "POLICY_DENIED"
@@ -192,6 +248,9 @@ export default async function RunDetailPage({ params }: Params) {
               }))}
             />
           </Card>
+
+          {/* Validation --------------------------------------------------- */}
+          <ValidationPanel view={validation} />
 
           {/* Changes ------------------------------------------------------ */}
           <Card>
@@ -271,7 +330,9 @@ export default async function RunDetailPage({ params }: Params) {
                           className={
                             approval.status === "APPROVED"
                               ? "border-allow/40 bg-allow/10 text-allow"
-                              : approval.status === "REJECTED"
+                              : approval.status === "REJECTED" ||
+                                  approval.status === "STALE" ||
+                                  approval.status === "EXPIRED"
                                 ? "border-deny/40 bg-deny/10 text-deny"
                                 : "border-border text-muted-foreground"
                           }
@@ -301,6 +362,42 @@ export default async function RunDetailPage({ params }: Params) {
                           {decision.comment && ` — “${decision.comment}”`}
                         </p>
                       ))}
+                      {(() => {
+                        const bound = boundById.get(approval.id);
+                        if (!bound) return null;
+                        return (
+                          <div className="mt-2 space-y-1.5">
+                            {/* Why it died, when it did. A STALE row is the most
+                                interesting entry in this table: it records that
+                                somebody approved something and the something
+                                then changed. */}
+                            {bound.superseded && (
+                              <p className="text-[11px] text-deny">
+                                {bound.superseded.reason} —{" "}
+                                {bound.superseded.message}
+                              </p>
+                            )}
+                            <p className="text-[11px] text-muted-foreground">
+                              {bound.binding.legacyUnbound ? (
+                                "No binding recorded (granted before artifact binding existed)."
+                              ) : (
+                                <>
+                                  Bound to{" "}
+                                  <Mono>{bound.binding.shortDigest}</Mono>
+                                  {bound.consumedBindingDigest && (
+                                    <>
+                                      {" · executed "}
+                                      <Mono>
+                                        {bound.consumedBindingDigest.slice(0, 12)}
+                                      </Mono>
+                                    </>
+                                  )}
+                                </>
+                              )}
+                            </p>
+                          </div>
+                        );
+                      })()}
                     </li>
                   ))}
               </ul>

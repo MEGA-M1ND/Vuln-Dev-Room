@@ -206,15 +206,29 @@ character of the diff and no prior receipt validates it.
 
 ## Surfacing
 
-There is currently **no UI** for the gate, the receipts, or a refusal's reason.
-The verdict is recorded on `PolicyDecision.resourceJson` as
-`{validationState, validationDetail}` and is visible through the evidence
-bundle and the run timeline's policy events, but nothing renders it as such.
-`ValidationProvenanceBadge` on handoff cards is the only visible piece.
+`ValidationPanel` on the run view (`/runs/[runId]`) renders it.
 
-Building that surface is the obvious next increment: a validation panel on the
-run view showing each receipt's command, environment, exit code and bound
-digest, with self-reported claims visually separated from executed ones.
+The layout is the control, not decoration. Executed receipts and claims sit in
+**separate sections under different headings** rather than one list with a
+status column — a reader skimming the page cannot mistake an assertion for an
+observation, because the two are not adjacent. Each row shows the command, the
+environment (or an explicit "none observed"), start and completion, the exit
+code, and the digest it tested. A receipt whose digest no longer matches the
+current proposal is flagged `≠ current` in red, with the reason.
+
+One thing the panel says out loud: when a run has a TEST_RESULT artifact
+reporting "48/48 passing" but no receipt, the page would otherwise read as a
+contradiction. The empty state explains that a test-results *artifact* records
+what was reported while a receipt records what the platform observed — the
+whole distinction, stated where someone would otherwise be confused by it.
+
+The gate verdict pill mirrors `runValidationGate`'s own computation against the
+same current proposal digest, so the panel and the policy engine cannot
+disagree. Rendering is read-only: nothing is written and no approval is touched
+by looking at the page.
+
+`PolicyDecision.resourceJson` still carries `{validationState,
+validationDetail}` for the audit trail and the evidence bundle.
 
 ---
 

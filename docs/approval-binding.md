@@ -266,6 +266,30 @@ ends with `errorCode: APPROVAL_<REASON>` and the reviewer is told what moved.
 
 ---
 
+## Surfacing
+
+Three places render the binding, all read-only — `src/lib/approvals/view.ts`
+never consumes or invalidates an approval, because merely opening the approvals
+list must not spend gates nobody has looked at yet.
+
+| Where | What |
+| --- | --- |
+| `ApprovalBindingPanel` on the gate | Binding digest, base commit and branch, policy digest, expiry countdown, planned actions, and every bound artifact with its digest — plus the line "editing any of these … invalidates this approval". |
+| `SupersededBanner` | Replaces the Approve/Reject buttons entirely once the binding stops holding. Names the machine-readable reason and the exact artifact that moved. Leaving an Approve button beside a "this changed" warning would invite the click the warning exists to prevent. |
+| Approvals queue (`/approvals`) | A queue-level count — "2 of 5 waiting approvals have been superseded" — and the banner on each affected row, so drift is visible before a reviewer opens anything. |
+
+Staleness is also detected **live while rendering**, not only read from an
+already-recorded `STALE` row. That is the case that matters most: it means the
+diff moved while the reviewer was reading it, and pressing Approve would fail.
+
+A run that *halted* because its approval stopped binding shows the banner and
+the dead binding rather than a generic "run failed" box — `errorCode` carries
+`APPROVAL_<REASON>`, which the run page decodes.
+
+Demo: `npx tsx scripts/demo-approval-binding.ts`.
+
+---
+
 ## Future work
 
 - Make execution transactional with the claim, closing the residual TOCTOU

@@ -22,7 +22,13 @@ export function BarBreakdown({
   data,
   emptyLabel = "No data yet",
 }: {
-  data: { label: string; value: number; tone?: string }[];
+  /**
+   * `id` is the stable identity of a row when the label is a derived, possibly
+   * non-unique display string — e.g. a repository bar labelled with only the
+   * basename, where `acme/api` and `other/api` both render as "api". Falls back
+   * to `label` when a caller has no separate id.
+   */
+  data: { label: string; value: number; tone?: string; id?: string }[];
   emptyLabel?: string;
 }) {
   const total = data.reduce((sum, row) => sum + row.value, 0);
@@ -40,7 +46,7 @@ export function BarBreakdown({
   return (
     <ul className="space-y-3 px-5 py-4">
       {data.map((row) => (
-        <li key={row.label}>
+        <li key={row.id ?? row.label}>
           <div className="flex items-baseline justify-between gap-3 text-xs">
             <span className="truncate text-muted-foreground">{row.label}</span>
             <span className="ag-numeric shrink-0 font-medium">{row.value}</span>

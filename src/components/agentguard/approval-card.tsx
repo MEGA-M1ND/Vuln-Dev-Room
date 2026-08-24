@@ -3,8 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import {
+  ApprovalBindingPanel,
+  SupersededBanner,
+} from "@/components/agentguard/approval-binding";
 import { Mono, Pill, RiskPill } from "@/components/agentguard/primitives";
 import { Button } from "@/components/ui/button";
+import type { ApprovalBindingView, SupersededView } from "@/lib/approvals/view";
 
 /**
  * The review card a reviewer acts on.
@@ -40,6 +45,8 @@ export function ApprovalCard({
   /** Why the viewer cannot decide, when they cannot. */
   blockedReason,
   compact = false,
+  binding,
+  superseded,
 }: {
   approvalId: string;
   action: string;
@@ -50,6 +57,10 @@ export function ApprovalCard({
   canDecide: boolean;
   blockedReason?: string | null;
   compact?: boolean;
+  /** What the decision is bound to. Omitted only by callers that predate it. */
+  binding?: ApprovalBindingView;
+  /** Set when the binding no longer holds; replaces the decision controls. */
+  superseded?: SupersededView | null;
 }) {
   const router = useRouter();
   const [comment, setComment] = useState("");
@@ -164,8 +175,20 @@ export function ApprovalCard({
         </div>
       )}
 
+      {binding && (
+        <div className="border-t border-gate/20 px-5 py-4">
+          <ApprovalBindingPanel binding={binding} />
+        </div>
+      )}
+
       <div className="border-t border-gate/20 px-5 py-4">
-        {canDecide ? (
+        {superseded ? (
+          // Deliberately replaces the buttons rather than sitting beside them.
+          // Leaving an Approve button next to a "this changed" warning invites
+          // exactly the click the warning exists to prevent — and the server
+          // would refuse it anyway.
+          <SupersededBanner superseded={superseded} />
+        ) : canDecide ? (
           <>
             <label
               htmlFor={`comment-${approvalId}`}
