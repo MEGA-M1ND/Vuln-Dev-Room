@@ -151,6 +151,73 @@ know the vocabulary still registers that they are being told something.
 
 ---
 
+## The gate as a policy rule
+
+`runValidationGate()` is wired into the policy engine as a **condition**, so a
+rule can require validation the same way it requires a branch pattern:
+
+```jsonc
+{
+  "actions": ["CREATE_PULL_REQUEST"],
+  "validationStates": ["UNSATISFIED"]
+}
+```
+…with effect `DENY`. That is the built-in rule `deny-unvalidated-delivery`.
+
+**It is opt-in, and that is deliberate.** It ships in a new `verified` policy
+profile rather than in the always-active global set. The reason is honest rather
+than cautious: the *simulated* executor does not actually run tests, so it
+cannot produce an `EXECUTED_BY_PLATFORM` receipt. Enabling this rule globally
+would block delivery on every simulated run, and the only way to "fix" that
+would be to have the mock write a receipt claiming an execution that never
+happened — precisely the lie this whole feature exists to prevent. A room whose
+agents run through the platform's own sandbox (which does produce receipts) can
+select the `verified` profile today.
+
+Two implementation notes worth knowing:
+
+**`evaluatePolicies` stays pure.** The matcher needs a database read, but making
+the evaluator async would break the policy simulator's guarantee that it runs
+the same code the executor does. So the state is resolved *before* evaluation
+(`policy-engine/validation-state.ts`) and travels on `PolicyContext` alongside
+`branch` and `path`. It is resolved only when some loaded rule actually uses the
+matcher, so a room without a validation rule pays nothing and behaves exactly as
+it did before.
+
+**Unresolved counts as UNSATISFIED.** If the state cannot be determined — no
+run, run missing — the matcher treats it as unsatisfied. "We could not establish
+that validation passed" and "validation did not pass" are the same thing to a
+gate, and the alternative would make the rule fail open exactly when something
+has gone wrong.
+
+### A receipt is bound to the *proposal*, not the full manifest
+
+`computeProposalDigest` covers `PLAN` and `DIFF` only — the change being
+proposed — while an approval binds to every artifact.
+
+This distinction is load-bearing and was found the hard way. Recording a
+platform execution writes its own stdout/stderr artifacts. A receipt bound to
+the full manifest therefore **invalidates itself the moment it is created**: the
+first wiring of this gate denied a run whose tests had genuinely passed seconds
+earlier. The narrower digest is still strict about what matters — edit one
+character of the diff and no prior receipt validates it.
+
+---
+
+## Surfacing
+
+There is currently **no UI** for the gate, the receipts, or a refusal's reason.
+The verdict is recorded on `PolicyDecision.resourceJson` as
+`{validationState, validationDetail}` and is visible through the evidence
+bundle and the run timeline's policy events, but nothing renders it as such.
+`ValidationProvenanceBadge` on handoff cards is the only visible piece.
+
+Building that surface is the obvious next increment: a validation panel on the
+run view showing each receipt's command, environment, exit code and bound
+digest, with self-reported claims visually separated from executed ones.
+
+---
+
 ## Limitations and future work
 
 - **`EXTERNALLY_ATTESTED` verifies nothing.** Until signature and issuer
@@ -160,13 +227,6 @@ know the vocabulary still registers that they are being told something.
   The callback records the `TEST_RESULT` artifact's creation time for both
   rather than inventing a duration. Threading real timestamps through
   `backend_agent.py` would improve the receipt.
-- **No gate consumes `runValidationGate()` yet.** The function and its
-  guarantees exist and are tested, but no policy rule currently *requires*
-  validation before an action. Wiring it into the policy engine as a condition
-  ("`CREATE_PULL_REQUEST` requires a passing platform-executed validation for the
-  approved artifact digest") is the natural next step and is deliberately not
-  bundled into this change.
-- **`boundArtifactDigest` is not yet populated by the runtime path**, so
-  replay protection currently applies only where a caller supplies it. The
-  column, the check and its tests exist; the built-in runtime needs to pass the
-  manifest digest through when it records a receipt.
+- **No UI surfaces any of this.** The only visible change is the provenance
+  badge on a handoff card. The gate's verdict, the receipts and their exit codes
+  are API- and database-level only. See "Surfacing" below.

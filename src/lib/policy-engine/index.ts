@@ -6,6 +6,10 @@ import { prisma } from "@/lib/db/client";
 
 import { evaluatePolicies } from "./evaluate";
 import {
+  needsValidationState,
+  resolveValidationState,
+} from "./validation-state";
+import {
   policyConditionSchema,
   type EvaluablePolicy,
   type PolicyContext,
@@ -35,7 +39,13 @@ export type {
   PolicyEvaluation,
   PolicyMatch,
   EvaluablePolicy,
+  ValidationState,
 } from "./types";
+export {
+  needsValidationState,
+  resolveValidationState,
+} from "./validation-state";
+export type { ResolvedValidation } from "./validation-state";
 
 /**
  * Narrow a persisted Policy row to the shape the pure evaluator accepts.
@@ -112,13 +122,31 @@ export async function loadActivePolicies(
   return policies.map(toEvaluable);
 }
 
-/** Load the active rules and evaluate one action against them. */
+/**
+ * Load the active rules and evaluate one action against them.
+ *
+ * Resolves the run's validation state first, but ONLY if some loaded rule
+ * actually matches on it (`needsValidationState`). A room with no validation
+ * rule pays nothing and behaves exactly as it did before the matcher existed.
+ */
 export async function evaluateAction(
   context: PolicyContext,
   policyProfileId?: string | null,
+  options: { runId?: string | null } = {},
 ): Promise<PolicyEvaluation> {
   const policies = await loadActivePolicies(context.roomId, policyProfileId);
-  return evaluatePolicies(context, policies);
+
+  let enriched = context;
+  if (context.validationState === undefined && needsValidationState(policies)) {
+    const resolved = await resolveValidationState(options.runId ?? null);
+    enriched = {
+      ...context,
+      validationState: resolved.state,
+      validationDetail: resolved.detail,
+    };
+  }
+
+  return evaluatePolicies(enriched, policies);
 }
 
 export type RecordDecisionInput = {
@@ -148,6 +176,14 @@ export async function recordPolicyDecision(input: RecordDecisionInput) {
     command: context.command ?? null,
     repository: context.repository ?? null,
     mode: context.mode,
+    // Recorded so the audit trail shows WHY a validation-gated action was
+    // refused, not merely that it was. Only present when a rule asked for it.
+    ...(context.validationState !== undefined
+      ? {
+          validationState: context.validationState ?? null,
+          validationDetail: context.validationDetail ?? null,
+        }
+      : {}),
   };
 
   return prisma.policyDecision.create({
@@ -176,9 +212,21 @@ export async function enforceAction(
     actorId?: string | null;
   } = {},
 ): Promise<PolicyEvaluation> {
-  const evaluation = await evaluateAction(context, options.policyProfileId);
+  const policies = await loadActivePolicies(context.roomId, options.policyProfileId);
+
+  let enriched = context;
+  if (context.validationState === undefined && needsValidationState(policies)) {
+    const resolved = await resolveValidationState(options.runId ?? null);
+    enriched = {
+      ...context,
+      validationState: resolved.state,
+      validationDetail: resolved.detail,
+    };
+  }
+
+  const evaluation = evaluatePolicies(enriched, policies);
   await recordPolicyDecision({
-    context,
+    context: enriched,
     evaluation,
     runId: options.runId ?? null,
     actorType: options.actorType,

@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db/client";
 import { scanAndRedact } from "@/lib/agent-coordination/redaction";
-import { computeArtifactContentHash } from "@/lib/approvals/binding";
+import { computeArtifactContentHash } from "@/lib/approvals/manifest";
 import {
   satisfiesValidationGate,
   type GateResult,

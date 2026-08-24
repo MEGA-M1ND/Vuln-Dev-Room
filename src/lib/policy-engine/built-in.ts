@@ -258,6 +258,58 @@ export const BUILT_IN_PROFILES: readonly BuiltInProfile[] = [
       },
     ],
   },
+  {
+    key: "verified",
+    name: "Verified delivery",
+    description:
+      "Standard, plus: a pull request may only be opened when the platform has itself run the tests against the exact artifacts being proposed. Select this for a room whose agents run through the platform's own sandbox, which produces the execution receipts this profile requires.",
+    isDefault: false,
+    policies: [
+      {
+        key: "verified-allow-working-branch-writes",
+        name: "Verified: allow writes on a working branch",
+        description:
+          "Same authoring permission as Standard. The difference between the two profiles is the delivery gate below, not what the agent may write.",
+        scope: "GLOBAL",
+        effect: "ALLOW",
+        riskLevel: "LOW",
+        message: "Writes on a dedicated working branch are permitted.",
+        priority: 80,
+        condition: { actions: ["WRITE_FILE", "CREATE_BRANCH"] },
+      },
+      {
+        key: "verified-allow-commands",
+        name: "Verified: allow ordinary commands",
+        description:
+          "Same command permission as Standard; the dangerous-command approval gate still applies on top.",
+        scope: "GLOBAL",
+        effect: "ALLOW",
+        riskLevel: "LOW",
+        message: "Ordinary build and test commands are permitted.",
+        priority: 80,
+        condition: { actions: ["RUN_COMMAND"] },
+      },
+      {
+        key: "deny-unvalidated-delivery",
+        name: "Delivery requires executed validation",
+        description:
+          "A pull request may only be opened when the platform has itself run the tests against the exact artifacts being proposed, and they passed. An agent's report that tests passed is an assertion about the world, not an observation of it — and the agent making the assertion is the party this gate exists to check. A genuine passing run against a patch that has since changed does not count either: the receipt is matched against the current artifact digest.",
+        scope: "GLOBAL",
+        effect: "DENY",
+        riskLevel: "HIGH",
+        message:
+          "This pull request cannot be created: the platform has no passing test execution for the current artifacts. A self-reported result is not evidence.",
+        // Below the approval gate at 50. Effect precedence already makes DENY
+        // win wherever both match; the ordering just makes the intent readable
+        // — this is a prohibition, not a request for a human.
+        priority: 20,
+        condition: {
+          actions: ["CREATE_PULL_REQUEST"],
+          validationStates: ["UNSATISFIED"],
+        },
+      },
+    ],
+  },
 ];
 
 /** Every built-in rule, global and profile-scoped, as one flat list. */

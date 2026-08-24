@@ -7,6 +7,22 @@ import type { GovernedAction, Prisma } from "@prisma/client";
 import { canonicalize } from "@/lib/audit/hash-chain";
 import { loadActivePolicies } from "@/lib/policy-engine";
 import { prisma } from "@/lib/db/client";
+import {
+  computeArtifactManifest,
+  type ArtifactManifestEntry,
+} from "./manifest";
+
+// Re-exported so the public surface of this module is unchanged by the
+// extraction into ./manifest (done to keep the module graph acyclic — see the
+// note at the top of that file).
+export {
+  computeArtifactContentHash,
+  computeArtifactManifest,
+  digestManifest,
+  computeManifestDigest,
+  computeProposalDigest,
+} from "./manifest";
+export type { ArtifactManifestEntry } from "./manifest";
 
 /**
  * Approval bindings.
@@ -46,14 +62,6 @@ import { prisma } from "@/lib/db/client";
 /** Bump when the payload shape changes; old digests then fail loudly. */
 export const BINDING_VERSION = 1;
 
-export type ArtifactManifestEntry = {
-  sequence: number;
-  id: string;
-  type: string;
-  title: string;
-  contentSha256: string;
-};
-
 /** A single action the approval authorizes, normalized. */
 export type PlannedAction = {
   action: GovernedAction | string;
@@ -86,63 +94,6 @@ export type ApprovalBinding = {
 
 function sha256(input: string): string {
   return createHash("sha256").update(input, "utf8").digest("hex");
-}
-
-/**
- * Digest of one artifact's content.
- *
- * Both `contentText` and `contentJson` participate, so moving content between
- * the two columns changes the digest — otherwise the same bytes could be
- * relocated to sneak past a comparison.
- */
-export function computeArtifactContentHash(artifact: {
-  contentText: string | null;
-  contentJson: Prisma.JsonValue | null;
-}): string {
-  return sha256(
-    canonicalize({
-      contentText: artifact.contentText ?? null,
-      contentJson: artifact.contentJson ?? null,
-    }),
-  );
-}
-
-/**
- * The ordered artifact manifest for a run.
- *
- * `title` and `type` are included as well as content: renaming an artifact
- * from "Unified diff" to "Nothing to see here" changes what a reviewer would
- * have understood themselves to be approving, so it must change the digest.
- *
- * Accepts a transaction client so the manifest can be read inside the same
- * transaction that verifies and consumes the approval.
- */
-export async function computeArtifactManifest(
-  db: Prisma.TransactionClient | typeof prisma,
-  runId: string,
-): Promise<ArtifactManifestEntry[]> {
-  const artifacts = await db.runArtifact.findMany({
-    where: { runId },
-    // Total order. `sequence` is unique per run (@@unique([runId, sequence])),
-    // so this is deterministic regardless of how Postgres returns rows.
-    orderBy: { sequence: "asc" },
-    select: {
-      id: true,
-      type: true,
-      title: true,
-      sequence: true,
-      contentText: true,
-      contentJson: true,
-    },
-  });
-
-  return artifacts.map((a) => ({
-    sequence: a.sequence,
-    id: a.id,
-    type: a.type,
-    title: a.title,
-    contentSha256: computeArtifactContentHash(a),
-  }));
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   recordExecutedValidation,
   recordSelfReportedValidation,
 } from "@/lib/attestation/receipts";
+import { computeProposalDigest } from "@/lib/approvals/manifest";
 import type { HandoffTestsRun } from "@/contracts/handoffs";
 import type { ValidationProvenance } from "@prisma/client";
 
@@ -117,6 +118,11 @@ async function materializeHandoffFromRunEvent(
       completedAt: testArtifact.createdAt,
       exitCode: meta!.exitCode!,
       stdout: testArtifact.contentText,
+      // Bind the receipt to the PROPOSAL (plan + diff), not the full manifest:
+      // storing this receipt writes its own log artifacts, and a receipt bound
+      // to the full manifest would invalidate itself the moment it was created.
+      // See computeProposalDigest for the full reasoning.
+      boundArtifactDigest: await computeProposalDigest(prisma, runId),
     });
     receiptId = receipt.id;
     provenance = "EXECUTED_BY_PLATFORM";

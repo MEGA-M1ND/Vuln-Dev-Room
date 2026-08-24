@@ -148,6 +148,17 @@ export function policyMatches(
     if (!hit) return false;
   }
 
+  if (condition.validationStates) {
+    // An unresolved validation state counts as UNSATISFIED. "We could not
+    // establish that validation passed" and "validation did not pass" are the
+    // same thing for the purpose of a gate, and the alternative — treating
+    // unknown as satisfied — would make the rule fail open precisely when
+    // something has gone wrong. Mirrors the SELF_REPORTED_BY_AGENT default on
+    // `ValidationProvenance`.
+    const state = context.validationState ?? "UNSATISFIED";
+    if (!condition.validationStates.includes(state)) return false;
+  }
+
   return true;
 }
 
